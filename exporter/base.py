@@ -1,5 +1,4 @@
 import datetime
-from django.core import serializers
 from google.cloud import bigquery
 from google.api_core.exceptions import GoogleAPICallError
 import logging
@@ -25,20 +24,11 @@ def batch_qs(qs, batch_size=1000):
         yield (start, end, total, qs[start:end])
 
 
-# override django serializer to export jsonl with datetime as string of format YYYY-MM-DD HH:MM:SS
-class BigQuerySerializer(serializers.json.Serializer):
-    def handle_field(self, obj, field):
-        value = field.value_from_object(obj)
-        if isinstance(value, datetime.datetime):
-            value = value.strftime('%Y-%m-%d %H:%M:%S')
-        return value
-
-
 class BigQueryExporter:
     model = None
     fields = []
     custom_fields = []
-    batch = 5000
+    batch = 1000
     table_name = ''
 
     def __init__(self):
@@ -47,13 +37,13 @@ class BigQueryExporter:
 
         try:
             self.client = bigquery.Client()
+            self.table = self.client.get_table(self.table_name)
         except GoogleAPICallError as e:
             logging.error(f'Error while creating BigQuery client: {e}')
 
-        self.queryset = self.define_queryset()
-
-        if not self.table_exists():
-            raise ValueError('Table %s does not exist' % self.table_name)
+        for field in self.custom_fields:
+            if not hasattr(self, field):
+                raise ValueError(f'Custom field {field} is not defined')
 
     def define_queryset(self):
         return self.model.objects.all()
@@ -61,26 +51,34 @@ class BigQueryExporter:
     def export(self):
         pull_time = datetime.datetime.now()
         try:
-            for start, end, total, qs in batch_qs(self.queryset, self.batch):
+            queryset = self.define_queryset()
+            for start, end, total, qs in batch_qs(queryset, self.batch):
                 print(f'Processing {start} - {end} of {total} {self.model}')
-                reporting_data = serializers.serialize('jsonl', qs, fields=self.fields, cls=BigQuerySerializer)
+                reporting_data = self._process_queryset(qs, pull_time)
                 if reporting_data:
-                    for obj in reporting_data:
-                        for field in self.custom_fields:
-                            obj['fields'][field.__name__] = field(obj)
-                        try:
-                            self.client.insert_rows_json(self.table_name, [obj['fields']], row_ids=[None] * len(obj['fields']))
-                        except Exception as e:
-                            logging.error(f'Error while exporting {obj["pk"]}: {e}')
+                    self._push_to_bigquery(reporting_data)
         except Exception as e:
             logging.error(f'Error while exporting {self.model}: {e}')
         finally:
-            print(f'Finished exporting {self.model} in {datetime.datetime.now() - pull_time}')
+            print(f'Finished exporting {len(queryset)} {self.model} in {datetime.datetime.now() - pull_time}')
 
-    def table_exists(self):
+    def _push_to_bigquery(self, data):
         try:
-            self.client.get_table(self.table_name)
-            return True
-        except Exception as e:
-            logging.error(f'Error while checking table {self.table_name}: {e}')
-            return False
+            errors = self.client.insert_rows(self.table, data)
+            if errors:
+                logging.error(f'Encountered errors while exporting {self.model}: {errors}')
+        except GoogleAPICallError as e:
+            logging.error(f'Error while exporting {self.model}: {e}')
+
+    def _process_queryset(self, queryset, pull_time):
+        processed_queryset = []
+        for obj in queryset:
+            processed_dict = {}
+            processed_dict['pull_date'] = pull_time.strftime('%Y-%m-%d %H:%M:%S')
+            for field in self.fields:
+                processed_dict[field] = getattr(obj, field)
+            for field in self.custom_fields:
+                if hasattr(self, field):
+                    processed_dict[field] = getattr(self, field)(obj)
+            processed_queryset.append(processed_dict)
+        return processed_queryset
