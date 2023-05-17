@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     install_requires=[
-        '<django>',
-        '<google-cloud-bigquery>',
+        'google-cloud-bigquery >= 2.30.1',
+        'pytest >= 7.3.0',
     ]
 )

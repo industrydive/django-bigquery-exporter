@@ -1,0 +1,6 @@
+-e .
+google-cloud-bigquery >= 2.30.1
+pytest >= 7.3.0
+pytest-xdist >= 2.3.0
+pytest-mock >= 3.6.1
+pytest-cov >= 2.12.1
