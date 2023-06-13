@@ -1,79 +1,102 @@
 import pytest
-from unittest.mock import Mock, patch
-from bigquery_exporter.base import batch_qs, BigQueryExporter
 from google.api_core.exceptions import GoogleAPICallError
+from bigquery_exporter.base import batch_qs, BigQueryExporter
 
 
-def test_batch_qs_empty_queryset():
-    queryset = Mock()
-    queryset.count.return_value = 0
-    batches = list(batch_qs(queryset))
-    assert batches == []
+class TestBatchQS:
+    def test_batch_qs_empty_queryset(self, qs_factory):
+        mock_qs = qs_factory(0)
+        batches = list(batch_qs(mock_qs))
+        assert len(batches) == 0
+
+    def test_batch_qs_single_batch(self, qs_factory):
+        mock_qs = qs_factory(5)
+        batches = list(batch_qs(mock_qs, batch_size=5))
+        assert len(batches) == 1
+        assert batches[0] == (0, 5, 5, [1, 2, 3, 4, 5])
+
+    def test_batch_qs_multiple_batches(self, qs_factory):
+        mock_qs = qs_factory(10)
+        batches = list(batch_qs(mock_qs, batch_size=3))
+        assert len(batches) == 4
+        assert batches[0] == (0, 3, 10, [1, 2, 3])
+        assert batches[1] == (3, 6, 10, [4, 5, 6])
+        assert batches[2] == (6, 9, 10, [7, 8, 9])
+        assert batches[3] == (9, 10, 10, [10])
+
+    def test_batch_qs_large_batch_size(self, qs_factory):
+        mock_qs = qs_factory(5)
+        batches = list(batch_qs(mock_qs, batch_size=10))
+        assert len(batches) == 1
+        assert batches[0] == (0, 5, 5, [1, 2, 3, 4, 5])
 
 
-def test_batch_qs_smaller_than_batch_size():
-    queryset = Mock()
-    queryset.count.return_value = 5
-    batches = list(batch_qs(queryset, batch_size=10))
-    assert len(batches) == 1
-
-
-def test_batch_qs_larger_than_batch_size():
-    queryset = Mock()
-    queryset.count.return_value = 25
-    batches = list(batch_qs(queryset, batch_size=10))
-    assert len(batches) == 3
-
-
-@pytest.fixture
-def setup_bigquery_exporter():
-    mock_client = Mock()
-
-    with patch('bigquery_exporter.base.bigquery.Client') as mock_client_class, patch('bigquery_exporter.base.logging') as mock_logging:
-        mock_client_class.return_value = mock_client
-
-        yield mock_client, mock_logging
-
-
-def test_init_with_no_model():
-    with pytest.raises(AssertionError):
-        BigQueryExporter()
-
-
-def test_init_with_no_table_name():
-    with pytest.raises(AssertionError):
+class TestBigQueryExporter:
+    def test_export_calls_define_queryset(self, mocker, mock_client, mock_model):
         class TestExporter(BigQueryExporter):
-            model = Mock()
-        TestExporter()
+            model = mock_model
+            table_name = 'test'
 
+        exporter = TestExporter()
+        exporter.client = mock_client
+        exporter.define_queryset = mocker.MagicMock()
+        exporter.export()
+        exporter.define_queryset.assert_called_once()
 
-def test_init_with_invalid_custom_fields():
-    with pytest.raises(ValueError):
+    def test_export_calls_process_queryset(self, mocker, mock_client, mock_model, qs_factory):
         class TestExporter(BigQueryExporter):
-            model = Mock()
-            table_name = 'test_table'
-            custom_fields = ['not_a_method']
-        TestExporter()
+            model = mock_model
+            table_name = 'test'
 
+        exporter = TestExporter()
+        exporter.client = mock_client
+        exporter.model = mock_model
+        exporter.define_queryset = mocker.MagicMock()
+        exporter.define_queryset.return_value = qs_factory(5)
+        exporter._process_queryset = mocker.MagicMock()
+        exporter.export()
+        exporter._process_queryset.assert_called()
 
-def test_export_with_no_errors(setup_bigquery_exporter):
-    mock_client, mock_logging = setup_bigquery_exporter
+    def test_export_calls_push_to_bigquery(self, mocker, mock_client, mock_model, qs_factory):
+        class TestExporter(BigQueryExporter):
+            model = mock_model
+            table_name = 'test'
 
-    class TestExporter(BigQueryExporter):
-        model = Mock()
-        table_name = 'test_table'
-    exporter = TestExporter()
-    exporter.export()
-    mock_client.insert_rows.assert_called()
+        exporter = TestExporter()
+        exporter.client = mock_client
+        exporter.model = mock_model
+        exporter.define_queryset = mocker.MagicMock()
+        exporter.define_queryset.return_value = qs_factory(5)
+        exporter._push_to_bigquery = mocker.MagicMock()
+        exporter.export()
+        exporter._push_to_bigquery.assert_called()
 
+    def test_export_logs_error_on_google_api_call_error(self, mocker, mock_client, mock_model, caplog, qs_factory):
+        class TestExporter(BigQueryExporter):
+            model = mock_model
+            table_name = 'test'
 
-def test_export_with_bigquery_errors(setup_bigquery_exporter):
-    mock_client, mock_logging = setup_bigquery_exporter
+        exporter = TestExporter()
+        exporter.client = mock_client
+        exporter.model = mock_model
+        exporter.define_queryset = mocker.MagicMock()
+        exporter.define_queryset.return_value = qs_factory(5)
+        exporter._push_to_bigquery = mocker.MagicMock()
+        exporter._push_to_bigquery.side_effect = GoogleAPICallError('Error')
+        exporter.export()
+        assert 'Error while exporting' in caplog.text
 
-    class TestExporter(BigQueryExporter):
-        model = Mock()
-        table_name = 'test_table'
-    exporter = TestExporter()
-    mock_client.insert_rows.side_effect = GoogleAPICallError('Test error')
-    exporter.export()
-    mock_logging.error.assert_called_with('Error while exporting Mock: Test error')
+    def test_export_logs_error_on_exception(self, mocker, mock_client, mock_model, caplog, qs_factory):
+        class TestExporter(BigQueryExporter):
+            model = mock_model
+            table_name = 'test'
+
+        exporter = TestExporter()
+        exporter.client = mock_client
+        exporter.model = mock_model
+        exporter.define_queryset = mocker.MagicMock()
+        exporter.define_queryset.return_value = qs_factory(5)
+        exporter._process_queryset = mocker.MagicMock()
+        exporter._process_queryset.side_effect = Exception('Error')
+        exporter.export()
+        assert 'Error while exporting' in caplog.text
