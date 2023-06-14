@@ -9,14 +9,32 @@
 name: Distribute new release
 
 on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
   release:
-    types: [published]
+    types: [created]
 
 permissions:
   contents: read
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-python@v3
+        with:
+          python-version: 3.11
+
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pytest -n auto --cov=bigquery_exporter --cov-report=xml
   build:
+    needs: ['test']
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -32,6 +50,8 @@ jobs:
         with:
           path: ./dist
   pypi-publish:
+    needs: ['build']
+    environment: 'release'
     name: upload release to PyPI
     runs-on: ubuntu-latest
     permissions:
@@ -44,4 +64,4 @@ jobs:
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         packages_dir: artifact/
-    
+
