@@ -1,4 +1,5 @@
 -e .
+django >= 3.2.5
 google-cloud-bigquery >= 2.30.1
 pytest >= 7.3.0
 pytest-xdist >= 2.3.0
