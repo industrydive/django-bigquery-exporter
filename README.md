@@ -1,7 +1,3 @@
-Sure, here's a basic example of what a README might look like for this project:
-
----
-
 # Django BigQuery Exporter
 
 This Django application provides a convenient way to export data from your Django models to Google BigQuery.
