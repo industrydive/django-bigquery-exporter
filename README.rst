@@ -1,6 +1,6 @@
-=====
+===============================
 Django BigQuery Exporter
-=====
+===============================
 
 Django BigQuery Exporter is simple library providing an admin-esque base class for batching and exporting Django models to Google BigQuery.
 
