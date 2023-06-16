@@ -15,6 +15,7 @@ on:
       - main
   release:
     types: [created]
+    
 
 permissions:
   contents: read
@@ -44,7 +45,9 @@ jobs:
           python-version: 3.11
 
       - run: |
-          python setup.py sdist
+          python -m pip install --upgrade pip
+          pip install build
+          python -m build
 
       - uses: actions/upload-artifact@v3
         with:
@@ -63,5 +66,5 @@ jobs:
     - name: Publish package distributions to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
-        packages_dir: artifact/
+        packages-dir: artifact/
 
