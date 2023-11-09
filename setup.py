@@ -7,5 +7,5 @@ setup(
     ],
     name='django-bigquery-exporter',
     packages=['bigquery_exporter'],
-    version='0.1.0',
+    version='0.1.1',
 )
