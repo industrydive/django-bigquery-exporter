@@ -72,7 +72,7 @@ class BigQueryExporter:
         Export data to BigQuery.
 
         Args:
-            pull_date (datetime.datetime, optional): The date to pull data from. If not provided, the current date and time will be used.
+            pull_date (datetime.datetime, optional): The datetime used to populate the pull_date field. If not provided, the current date and time will be used.
 
         Raises:
             Exception: If an error occurs while exporting the data.
