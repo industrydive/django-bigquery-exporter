@@ -3,6 +3,13 @@ from google.cloud import bigquery
 from google.api_core.exceptions import GoogleAPICallError
 import logging
 
+def custom_field(function):
+    """
+    Decorator to mark a method as a custom field for a BigQueryExporter subclass.
+    """
+    function.is_custom_field = True
+    return function
+
 
 def batch_qs(qs, batch_size=1000):
     """
@@ -27,7 +34,6 @@ def batch_qs(qs, batch_size=1000):
 class BigQueryExporter:
     model = None
     fields = []
-    custom_fields = []
     batch = 1000
     table_name = ''
 
@@ -98,12 +104,14 @@ class BigQueryExporter:
     def _process_queryset(self, queryset, pull_time):
         processed_queryset = []
         for obj in queryset:
-            processed_dict = {}
-            processed_dict['pull_date'] = pull_time.strftime('%Y-%m-%d %H:%M:%S')
+            processed_dict = {'pull_date': pull_time.strftime('%Y-%m-%d %H:%M:%S')}
             for field in self.fields:
-                processed_dict[field] = getattr(obj, field)
-            for field in self.custom_fields:
                 if hasattr(self, field):
-                    processed_dict[field] = getattr(self, field)(obj)
+                    if callable(getattr(self, field)) and getattr(getattr(self, field), 'is_custom_field', False):
+                        # If the field is a custom field method
+                        processed_dict[field] = getattr(self, field)(obj)
+                else:
+                    # Regular field
+                    processed_dict[field] = getattr(obj, field)
             processed_queryset.append(processed_dict)
         return processed_queryset
