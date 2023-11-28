@@ -48,8 +48,8 @@ class BigQueryExporter:
     def define_queryset(self):
         return self.model.objects.all()
 
-    def export(self):
-        pull_time = datetime.datetime.now()
+    def export(self, pull_date=None, *args, **kwargs):
+        pull_time = datetime.datetime.now() if not pull_date else pull_date
         try:
             queryset = self.define_queryset()
             for start, end, total, qs in batch_qs(queryset, self.batch):
