@@ -46,7 +46,7 @@ class BigQueryExporter:
                 raise ValueError(f'Custom field {field} is not defined')
 
     def define_queryset(self):
-        return self.model.objects.all()
+        return self.model.objects.all().order_by('id')
 
     def export(self, pull_date=None, *args, **kwargs):
         pull_time = datetime.datetime.now() if not pull_date else pull_date
