@@ -78,14 +78,14 @@ class TestBigQueryExporter:
         test_exporter.export()
         assert 'Error while exporting' in caplog.text
 
-    def test_custom_field_decorator_sets_is_custom_field_attribute_function(self):
+    def test_custom_field_decorator_sets_custom_attribute_on_callable(self):
         @custom_field
-        def test_field(self):
+        def test_field():
             pass
 
         assert test_field.is_custom_field
 
-    def test_custom_field_decorator(mocker, mock_client, mock_model):
+    def test_custom_field_succeeds_during_processing(mocker, mock_client, mock_model):
         mock_model.field_value = 1
 
         class TestBigQueryExporter(BigQueryExporter):
