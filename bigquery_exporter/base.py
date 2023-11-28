@@ -3,6 +3,7 @@ from google.cloud import bigquery
 from google.api_core.exceptions import GoogleAPICallError
 import logging
 
+
 def custom_field(function):
     """
     Decorator to mark a method as a custom field for a BigQueryExporter subclass.
@@ -50,7 +51,9 @@ class BigQueryExporter:
         for field in self.fields:
             # check that all fields are valid (either a model field or a custom field method)
             if not hasattr(self.model, field) and not hasattr(self, field):
-                raise Exception(f'Invalid field {field} for model {self.model}. Must be a model field or a custom field method.')
+                raise Exception(
+                    f'Invalid field {field} for model {self.model}. Must be a model field or a custom field method.'
+                )
 
     def define_queryset(self):
         """
@@ -73,7 +76,8 @@ class BigQueryExporter:
         Export data to BigQuery.
 
         Args:
-            pull_date (datetime.datetime, optional): The date to pull data from. If not provided, the current date and time will be used.
+            pull_date (datetime.datetime, optional): The datetime used to populate the pull_date field.
+                If not provided, the current date and time will be used.
 
         Raises:
             Exception: If an error occurs while exporting the data.
@@ -107,10 +111,11 @@ class BigQueryExporter:
         for obj in queryset:
             processed_dict = {'pull_date': pull_time.strftime('%Y-%m-%d %H:%M:%S')}
             for field in self.fields:
-                if hasattr(self, field):
-                    if callable(getattr(self, field)) and getattr(getattr(self, field), 'is_custom_field', False):
-                        # If the field is a custom field method
-                        processed_dict[field] = getattr(self, field)(obj)
+                # if the field appears in the exporter class, check if it's a custom field method
+                exporter_field = getattr(self, field, None)
+                if callable(exporter_field) and getattr(exporter_field, 'is_custom_field', False):
+                    # If the field is a custom field method
+                    processed_dict[field] = exporter_field(obj)
                 else:
                     # Regular field
                     processed_dict[field] = getattr(obj, field)
