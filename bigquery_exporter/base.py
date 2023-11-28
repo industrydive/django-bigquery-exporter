@@ -47,9 +47,10 @@ class BigQueryExporter:
         except GoogleAPICallError as e:
             logging.error(f'Error while creating BigQuery client: {e}')
 
-        for field in self.custom_fields:
-            if not hasattr(self, field):
-                raise ValueError(f'Custom field {field} is not defined')
+        for field in self.fields:
+            # check that all fields are valid (either a model field or a custom field method)
+            if not hasattr(self.model, field) and not hasattr(self, field):
+                raise Exception(f'Invalid field {field} for model {self.model}. Must be a model field or a custom field method.')
 
     def define_queryset(self):
         """
