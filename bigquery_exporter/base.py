@@ -46,9 +46,34 @@ class BigQueryExporter:
                 raise ValueError(f'Custom field {field} is not defined')
 
     def define_queryset(self):
+        """
+        Returns the queryset for exporting data to BigQuery.
+
+        This method can be overridden in subclasses to specify additional filters or ordering
+        for the queryset. For example, you can use this method to filter data based on date ranges
+        or status fields.
+
+        It is important to note that if the queryset is larger than the class's batch size,
+        it must be ordered to avoid ordering bugs when accessing different segments of the queryset.
+
+        Returns:
+            QuerySet: The queryset for exporting data to BigQuery.
+        """
         return self.model.objects.all().order_by('id')
 
     def export(self, pull_date=None, *args, **kwargs):
+        """
+        Export data to BigQuery.
+
+        Args:
+            pull_date (datetime.datetime, optional): The date to pull data from. If not provided, the current date and time will be used.
+
+        Raises:
+            Exception: If an error occurs while exporting the data.
+
+        Returns:
+            None
+        """
         pull_time = datetime.datetime.now() if not pull_date else pull_date
         try:
             queryset = self.define_queryset()
