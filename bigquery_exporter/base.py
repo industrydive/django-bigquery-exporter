@@ -1,7 +1,10 @@
 import datetime
-from google.cloud import bigquery
-from google.api_core.exceptions import GoogleAPICallError
 import logging
+from google.cloud import bigquery
+from google.oauth2 import service_account
+from google.api_core.exceptions import GoogleAPICallError
+
+logger = logging.getLogger(__name__)
 
 
 def custom_field(method):
@@ -13,6 +16,7 @@ def custom_field(method):
         'Custom field methods must have exactly two arguments: self and the Django model instance'
     method.is_custom_field = True
     return method
+
 
 def batch_qs(qs, batch_size=1000):
     """
@@ -41,12 +45,16 @@ class BigQueryExporter:
     batch = 1000
     table_name = ''
 
-    def __init__(self):
+    def __init__(self, project, credentials):
         assert self.model is not None, 'Model is not defined'
         assert self.table_name != '', 'BigQuery table name is not defined'
 
         try:
-            self.client = bigquery.Client()
+            if credentials:  # use service account credentials if provided
+                service_account_info = service_account.Credentials.from_service_account_file(credentials)
+                self.client = bigquery.Client(project=project, credentials=service_account_info)
+            else:  # otherwise, use default credentials
+                self.client = bigquery.Client(project=project)
             self.table = self.client.get_table(self.table_name)
         except GoogleAPICallError as e:
             logging.error(f'Error while creating BigQuery client: {e}')
@@ -92,22 +100,23 @@ class BigQueryExporter:
         try:
             queryset = self.define_queryset()
             for start, end, total, qs in batch_qs(queryset, self.batch):
-                print(f'Processing {start} - {end} of {total} {self.model}')
+                logger.info(f'Processing {start} - {end} of {total} {self.model}')
                 reporting_data = self._process_queryset(qs, pull_time)
                 if reporting_data:
                     self._push_to_bigquery(reporting_data)
+            logger.info(
+                f'Finished exporting {len(self.queryset)} {self.model} in {datetime.datetime.now() - pull_time}'
+                )
         except Exception as e:
-            logging.error(f'Error while exporting {self.model}: {e}')
-        finally:
-            print(f'Finished exporting {len(queryset)} {self.model} in {datetime.datetime.now() - pull_time}')
+            logger.error(f'Error while exporting {self.model}: {e}')
 
     def _push_to_bigquery(self, data):
         try:
             errors = self.client.insert_rows(self.table, data)
             if errors:
-                logging.error(f'Encountered errors while exporting {self.model}: {errors}')
+                logger.error(f'Encountered errors while exporting {self.model}: {errors}')
         except GoogleAPICallError as e:
-            logging.error(f'Error while exporting {self.model}: {e}')
+            logger.error(f'Error while exporting {self.model}: {e}')
 
     def _process_queryset(self, queryset, pull_time):
         processed_queryset = []
