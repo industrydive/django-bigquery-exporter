@@ -14,7 +14,6 @@ def custom_field(method):
     method.is_custom_field = True
     return method
 
-
 def batch_qs(qs, batch_size=1000):
     """
     Returns a (start, end, total, queryset) tuple for each batch in the given
@@ -38,6 +37,7 @@ def batch_qs(qs, batch_size=1000):
 class BigQueryExporter:
     model = None
     fields = []
+    custom_fields = []
     batch = 1000
     table_name = ''
 
