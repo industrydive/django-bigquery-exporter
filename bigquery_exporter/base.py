@@ -45,7 +45,7 @@ class BigQueryExporter:
     batch = 1000
     table_name = ''
 
-    def __init__(self, project, credentials):
+    def __init__(self, project=None, credentials=None):
         assert self.model is not None, 'Model is not defined'
         assert self.table_name != '', 'BigQuery table name is not defined'
 
