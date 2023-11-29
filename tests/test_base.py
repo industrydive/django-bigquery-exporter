@@ -80,7 +80,7 @@ class TestBigQueryExporter:
 
     def test_custom_field_decorator_sets_custom_attribute_on_callable(self):
         @custom_field
-        def test_field():
+        def test_field(self, obj):
             pass
 
         assert test_field.is_custom_field

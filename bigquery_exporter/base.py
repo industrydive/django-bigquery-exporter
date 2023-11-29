@@ -9,7 +9,7 @@ def custom_field(method):
     Decorator to mark a method as a custom field for a BigQueryExporter subclass.
     """
     # Ensure that the method has exactly two arguments: self and the Django model instance
-    assert method.__code__.co_argcount != 2, \
+    assert method.__code__.co_argcount == 2, \
         'Custom field methods must have exactly two arguments: self and the Django model instance'
     method.is_custom_field = True
     return method
