@@ -4,6 +4,16 @@ from google.api_core.exceptions import GoogleAPICallError
 import logging
 
 
+def custom_field(method):
+    """
+    Decorator to mark a method as a custom field for a BigQueryExporter subclass.
+    """
+    # Ensure that the method has exactly two arguments: self and the Django model instance
+    assert method.__code__.co_argcount == 2, \
+        'Custom field methods must have exactly two arguments: self and the Django model instance'
+    method.is_custom_field = True
+    return method
+
 def batch_qs(qs, batch_size=1000):
     """
     Returns a (start, end, total, queryset) tuple for each batch in the given
@@ -41,9 +51,12 @@ class BigQueryExporter:
         except GoogleAPICallError as e:
             logging.error(f'Error while creating BigQuery client: {e}')
 
-        for field in self.custom_fields:
-            if not hasattr(self, field):
-                raise ValueError(f'Custom field {field} is not defined')
+        for field in self.fields:
+            # check that all fields are valid (either a model field or a custom field method)
+            if not hasattr(self.model, field) and not hasattr(self, field):
+                raise Exception(
+                    f'Invalid field {field} for model {self.model}. Must be a model field or a custom field method.'
+                )
 
     def define_queryset(self):
         """
@@ -66,7 +79,8 @@ class BigQueryExporter:
         Export data to BigQuery.
 
         Args:
-            pull_date (datetime.datetime, optional): The datetime used to populate the pull_date field. If not provided, the current date and time will be used.
+            pull_date (datetime.datetime, optional): The datetime used to populate the pull_date field.
+                If not provided, the current date and time will be used.
 
         Raises:
             Exception: If an error occurs while exporting the data.
@@ -97,13 +111,16 @@ class BigQueryExporter:
 
     def _process_queryset(self, queryset, pull_time):
         processed_queryset = []
-        for obj in queryset:
-            processed_dict = {}
-            processed_dict['pull_date'] = pull_time.strftime('%Y-%m-%d %H:%M:%S')
+        for model_instance in queryset:
+            processed_dict = {'pull_date': pull_time.strftime('%Y-%m-%d %H:%M:%S')}
             for field in self.fields:
-                processed_dict[field] = getattr(obj, field)
-            for field in self.custom_fields:
-                if hasattr(self, field):
-                    processed_dict[field] = getattr(self, field)(obj)
+                # if the field appears in the exporter class, check if it's a custom field method
+                exporter_field = getattr(self, field, None)
+                if callable(exporter_field) and getattr(exporter_field, 'is_custom_field', False):
+                    # If the field is a custom field method, call the method with the model instance
+                    processed_dict[field] = exporter_field(model_instance)
+                else:
+                    # Regular field
+                    processed_dict[field] = getattr(model_instance, field)
             processed_queryset.append(processed_dict)
         return processed_queryset
