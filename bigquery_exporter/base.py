@@ -4,12 +4,15 @@ from google.api_core.exceptions import GoogleAPICallError
 import logging
 
 
-def custom_field(function):
+def custom_field(method):
     """
     Decorator to mark a method as a custom field for a BigQueryExporter subclass.
     """
-    function.is_custom_field = True
-    return function
+    # Ensure that the method has exactly two arguments: self and the Django model instance
+    assert method.__code__.co_argcount != 2, \
+        'Custom field methods must have exactly two arguments: self and the Django model instance'
+    method.is_custom_field = True
+    return method
 
 
 def batch_qs(qs, batch_size=1000):
@@ -108,16 +111,16 @@ class BigQueryExporter:
 
     def _process_queryset(self, queryset, pull_time):
         processed_queryset = []
-        for obj in queryset:
+        for model_instance in queryset:
             processed_dict = {'pull_date': pull_time.strftime('%Y-%m-%d %H:%M:%S')}
             for field in self.fields:
                 # if the field appears in the exporter class, check if it's a custom field method
                 exporter_field = getattr(self, field, None)
                 if callable(exporter_field) and getattr(exporter_field, 'is_custom_field', False):
-                    # If the field is a custom field method
-                    processed_dict[field] = exporter_field(obj)
+                    # If the field is a custom field method, call the method with the model instance
+                    processed_dict[field] = exporter_field(model_instance)
                 else:
                     # Regular field
-                    processed_dict[field] = getattr(obj, field)
+                    processed_dict[field] = getattr(model_instance, field)
             processed_queryset.append(processed_dict)
         return processed_queryset
