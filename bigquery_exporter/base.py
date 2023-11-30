@@ -45,6 +45,7 @@ class BigQueryExporter:
     custom_fields = []
     batch = 1000
     table_name = ''
+    replace_nulls_with_empty = False
 
     def __init__(self, project=None, credentials=None):
         assert self.model is not None, 'Model is not defined'
@@ -137,6 +138,8 @@ class BigQueryExporter:
                         processed_dict[field] = model_field.strftime('%Y-%m-%d %H:%M:%S')
                     elif isinstance(model_field, UUID):
                         processed_dict[field] = str(model_field)
+                    elif model_field is None:
+                        processed_dict[field] = '' if self.replace_nulls_with_empty else None
                     else:
                         processed_dict[field] = model_field
             processed_queryset.append(processed_dict)
