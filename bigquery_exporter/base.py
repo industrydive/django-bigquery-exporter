@@ -130,6 +130,11 @@ class BigQueryExporter:
                     processed_dict[field] = exporter_field(model_instance)
                 else:
                     # Regular field
-                    processed_dict[field] = getattr(model_instance, field)
+                    model_field = getattr(model_instance, field)
+                    # if the model is a datetime, sanitize to a BQ compliant string
+                    if isinstance(model_field, datetime.datetime):
+                        processed_dict[field] = model_field.strftime('%Y-%m-%d %H:%M:%S')
+                    else:
+                        processed_dict[field] = model_field
             processed_queryset.append(processed_dict)
         return processed_queryset
