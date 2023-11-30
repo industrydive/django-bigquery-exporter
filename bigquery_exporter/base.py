@@ -1,5 +1,6 @@
 import datetime
 import logging
+from uuid import UUID
 from google.cloud import bigquery
 from google.oauth2 import service_account
 from google.api_core.exceptions import GoogleAPICallError
@@ -105,7 +106,7 @@ class BigQueryExporter:
                 if reporting_data:
                     self._push_to_bigquery(reporting_data)
             logger.info(
-                f'Finished exporting {len(self.queryset)} {self.model} in {datetime.datetime.now() - pull_time}'
+                f'Finished exporting {len(queryset)} {self.model} in {datetime.datetime.now() - pull_time}'
                 )
         except Exception as e:
             logger.error(f'Error while exporting {self.model}: {e}')
@@ -134,6 +135,8 @@ class BigQueryExporter:
                     # if the model is a datetime, sanitize to a BQ compliant string
                     if isinstance(model_field, datetime.datetime):
                         processed_dict[field] = model_field.strftime('%Y-%m-%d %H:%M:%S')
+                    elif isinstance(model_field, UUID):
+                        processed_dict[field] = str(model_field)
                     else:
                         processed_dict[field] = model_field
             processed_queryset.append(processed_dict)
