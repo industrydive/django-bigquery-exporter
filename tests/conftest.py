@@ -1,6 +1,7 @@
 import pytest
 
 from django.db import models
+from google.cloud import bigquery
 
 @pytest.fixture
 def qs_factory(mocker):
@@ -17,11 +18,28 @@ def qs_factory(mocker):
     return _qs_factory
 
 @pytest.fixture
+def bigquery_client_factory(mocker):
+    def _factory(table_name, fields):
+        schema = [bigquery.SchemaField(field, 'STRING') for field in fields]
+
+        # Mocking the BigQuery client
+        client = mocker.Mock(spec=bigquery.Client)
+        # Mocking the table and schema
+        table = mocker.MagicMock(table_name=table_name, schema=schema)
+        # Setting up the client to return the mocked table
+        client.get_table.return_value = table
+
+        return client
+
+    return _factory
+
+@pytest.fixture
 def mock_client(mocker):
     client = mocker.patch('bigquery_exporter.base.bigquery.Client')
     table = mocker.MagicMock()
+    table.schema = [mocker.MagicMock(name='field1'), mocker.MagicMock(name='field2')]
     client.get_table.return_value = table
-    yield client
+    return client
 
 @pytest.fixture
 def mock_model(mocker):

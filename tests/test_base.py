@@ -85,8 +85,11 @@ class TestBigQueryExporter:
 
         assert test_field.is_custom_field
 
-    def test_custom_field_succeeds_during_processing(mocker, mock_client, mock_model):
+    def test_custom_field_succeeds_during_processing(self, bigquery_client_factory, mocker, mock_model):
         mock_model.field_value = 1
+        # mock the client to return a table with the field 'field_value' and 'custom_field'
+        mock_client = bigquery_client_factory('test_table', ['field_value', 'custom_field'])
+        mocker.patch('bigquery_exporter.base.bigquery.Client', return_value=mock_client)
 
         class TestBigQueryExporter(BigQueryExporter):
             model = mock_model
