@@ -121,25 +121,37 @@ class BigQueryExporter:
         for model_instance in queryset:
             processed_dict = {'pull_date': pull_time.strftime('%Y-%m-%d %H:%M:%S')}
             for field in self.fields:
-                # if the field appears in the exporter class, check if it's a custom field method
-                exporter_field = getattr(self, field, None)
-                if callable(exporter_field) and getattr(exporter_field, 'is_custom_field', False):
-                    # If the field is a custom field method, call the method with the model instance
-                    processed_dict[field] = exporter_field(model_instance)
-                else:
-                    # Regular field
-                    model_field = getattr(model_instance, field)
-                    # if the model is a datetime, sanitize to a BQ compliant string
-                    if isinstance(model_field, datetime.datetime):
-                        processed_dict[field] = model_field.strftime('%Y-%m-%d %H:%M:%S')
-                    elif isinstance(model_field, UUID):
-                        processed_dict[field] = str(model_field)
-                    elif model_field is None:
-                        processed_dict[field] = '' if self.replace_nulls_with_empty else None
-                    else:
-                        processed_dict[field] = model_field
+                processed_dict[field] = self._process_field(model_instance, field)
             processed_queryset.append(processed_dict)
         return processed_queryset
+
+    def _process_field(self, model_instance, field):
+        exporter_field = getattr(self, field, None)
+        if callable(exporter_field) and getattr(exporter_field, 'is_custom_field', False):
+            return exporter_field(model_instance)
+        else:
+            model_field = getattr(model_instance, field)
+            return self._sanitize_value(model_field)
+
+    def _sanitize_value(self, value):
+        """
+        Sanitizes db values to be BigQuery compliant. Converts datetimes and UUIDs to strings.
+        Checks for null values and replaces them with empty strings if replace_nulls_with_empty is True.
+
+        Args:
+            value: The value to be sanitized.
+        Returns:
+            The sanitized value.
+
+        """
+        if isinstance(value, datetime.datetime):
+            return value.strftime('%Y-%m-%d %H:%M:%S')
+        elif isinstance(value, UUID):
+            return str(value)
+        elif value is None:
+            return '' if self.replace_nulls_with_empty else None
+        else:
+            return value
 
     def _validate_fields(self):
         """
