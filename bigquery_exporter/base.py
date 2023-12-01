@@ -96,6 +96,26 @@ class BigQueryExporter:
         except Exception as e:
             logger.error(f'Error while exporting {self.model}: {e}')
 
+    def table_has_data(self, pull_date=None):
+        """
+        Checks if the BigQuery table has data for the given pull_date.
+
+        Args:
+            pull_date (datetime.datetime, optional): The pull_date to check for. If not provided,
+                the current date and time will be used.
+
+        Returns:
+            bool: True if the table has data for the given pull_date, False otherwise.
+        """
+        if pull_date:
+            query = f'SELECT COUNT(*) FROM {self.table_name} WHERE DATE(pull_date) = "{pull_date.strftime("%Y-%m-%d")}"'
+        else:
+            query = f'SELECT COUNT(*) FROM {self.table_name}'
+        query_job = self.client.query(query)
+        results = query_job.result()
+        for row in results:
+            return row[0] > 0
+        return False
 
     def _initialize_client(self, project=None, credentials=None):
         try:
