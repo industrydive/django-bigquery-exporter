@@ -3,6 +3,7 @@ import pytest
 from django.db import models
 from google.cloud import bigquery
 
+
 @pytest.fixture
 def qs_factory(mocker):
     def _qs_factory(size):
@@ -16,6 +17,7 @@ def qs_factory(mocker):
             mock_qs.count.return_value = size
         return mock_qs
     return _qs_factory
+
 
 @pytest.fixture
 def bigquery_client_factory(mocker):
@@ -33,6 +35,7 @@ def bigquery_client_factory(mocker):
 
     return _factory
 
+
 @pytest.fixture
 def mock_client(mocker):
     client = mocker.patch('bigquery_exporter.base.bigquery.Client')
@@ -40,6 +43,7 @@ def mock_client(mocker):
     table.schema = [mocker.MagicMock(name='field1'), mocker.MagicMock(name='field2')]
     client.get_table.return_value = table
     return client
+
 
 @pytest.fixture
 def mock_model(mocker):
