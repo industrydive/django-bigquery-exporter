@@ -42,7 +42,6 @@ def batch_qs(qs, batch_size=1000):
 class BigQueryExporter:
     model = None
     fields = []
-    custom_fields = []
     batch = 1000
     table_name = ''
     replace_nulls_with_empty = False
@@ -50,23 +49,8 @@ class BigQueryExporter:
     def __init__(self, project=None, credentials=None):
         assert self.model is not None, 'Model is not defined'
         assert self.table_name != '', 'BigQuery table name is not defined'
-
-        try:
-            if credentials:  # use service account credentials if provided
-                service_account_info = service_account.Credentials.from_service_account_file(credentials)
-                self.client = bigquery.Client(project=project, credentials=service_account_info)
-            else:  # otherwise, use default credentials
-                self.client = bigquery.Client(project=project)
-            self.table = self.client.get_table(self.table_name)
-        except GoogleAPICallError as e:
-            logging.error(f'Error while creating BigQuery client: {e}')
-
-        for field in self.fields:
-            # check that all fields are valid (either a model field or a custom field method)
-            if not hasattr(self.model, field) and not hasattr(self, field):
-                raise Exception(
-                    f'Invalid field {field} for model {self.model}. Must be a model field or a custom field method.'
-                )
+        self._initialize_client(project, credentials)
+        self._validate_fields()
 
     def define_queryset(self):
         """
@@ -84,7 +68,7 @@ class BigQueryExporter:
         """
         return self.model.objects.all().order_by('id')
 
-    def export(self, pull_date=None, *args, **kwargs):
+    def export(self, pull_date=None):
         """
         Export data to BigQuery.
 
@@ -112,11 +96,23 @@ class BigQueryExporter:
         except Exception as e:
             logger.error(f'Error while exporting {self.model}: {e}')
 
+
+    def _initialize_client(self, project=None, credentials=None):
+        try:
+            if credentials:  # use service account credentials if provided
+                service_account_info = service_account.Credentials.from_service_account_file(credentials)
+                self.client = bigquery.Client(project=project, credentials=service_account_info)
+            else:  # otherwise, use default credentials
+                self.client = bigquery.Client(project=project)
+            self.table = self.client.get_table(self.table_name)
+        except GoogleAPICallError as e:
+            logging.error(f'Error while creating BigQuery client: {e}')
+
     def _push_to_bigquery(self, data):
         try:
             errors = self.client.insert_rows(self.table, data)
             if errors:
-                logger.error(f'Encountered errors while exporting {self.model}: {errors}')
+                logger.error(f'Encountered errors while pushing to BigQuery {self.model}: {errors}')
         except GoogleAPICallError as e:
             logger.error(f'Error while exporting {self.model}: {e}')
 
@@ -144,3 +140,27 @@ class BigQueryExporter:
                         processed_dict[field] = model_field
             processed_queryset.append(processed_dict)
         return processed_queryset
+
+    def _validate_fields(self):
+        """
+        Validates the fields defined in the exporter.
+        """
+        self._validate_fields_against_model()
+        self._validate_fields_against_table()
+
+    def _validate_fields_against_model(self):
+        for field in self.fields:
+            # check that all fields are valid (either a model field or a custom field method)
+            if not hasattr(self.model, field) and not hasattr(self, field):
+                raise Exception(
+                    f'Invalid field {field} for model {self.model}. Must be a model field or a custom field method.'
+                )
+
+    def _validate_fields_against_table(self):
+        """
+        Validates that the fields defined in the exporter match the fields in the BigQuery table.
+        """
+        table_fields = [field.name for field in self.table.schema]
+        for field in self.fields:
+            if field not in table_fields:
+                raise Exception(f'Field {field} is not in the BigQuery table {self.table_name}')
