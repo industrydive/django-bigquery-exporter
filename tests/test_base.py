@@ -1,6 +1,7 @@
 import pytest
 import datetime
-from google.api_core.exceptions import GoogleAPICallError
+from google.api_core.exceptions import GoogleAPICallError, RetryError
+
 from bigquery_exporter.base import batch_qs, custom_field, BigQueryExporter
 
 
@@ -69,14 +70,18 @@ class TestBigQueryExporter:
         test_exporter._push_to_bigquery.assert_called()
 
     def test_export_logs_error_on_google_api_call_error(self, test_exporter, caplog):
-        test_exporter._push_to_bigquery.side_effect = GoogleAPICallError('Error')
-        test_exporter.export()
-        assert 'Error while exporting' in caplog.text
+        with pytest.raises(GoogleAPICallError):
+            test_exporter._push_to_bigquery.side_effect = GoogleAPICallError('Error', 'error')
+            test_exporter.export()
+            assert 'Error pushing TestExporter' in caplog.text
+            assert 'GoogleAPICallError' in caplog.text
 
     def test_export_logs_error_on_exception(self, test_exporter, caplog):
-        test_exporter._push_to_bigquery.side_effect = Exception('Error')
-        test_exporter.export()
-        assert 'Error while exporting' in caplog.text
+        with pytest.raises(RetryError):
+            test_exporter._push_to_bigquery.side_effect = RetryError('Error', 'error')
+            test_exporter.export()
+            assert 'Error pushing TestExporter' in caplog.text
+            assert 'RetryError' in caplog.text
 
     def test_custom_field_decorator_sets_custom_attribute_on_callable(self):
         @custom_field
