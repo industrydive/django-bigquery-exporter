@@ -116,7 +116,7 @@ class BigQueryExporter:
                         # updating the row index to account for the batch offset
                         for error in batch_errors:
                             error['index'] += start
-                        errors.extend(errors)
+                        errors.extend(batch_errors)
 
             logger.info(f'Finished exporting {len(queryset)} {self.model} in {datetime.datetime.now() - pull_time}')
         except (GoogleAPICallError, RetryError) as e:
