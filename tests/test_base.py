@@ -61,6 +61,10 @@ class TestBigQueryExporter:
         test_exporter.export()
         test_exporter.define_queryset.assert_called_once()
 
+    def test_export_does_not_call_define_queryset_when_queryset_provided(self, test_exporter, qs_factory):
+        test_exporter.export(queryset=qs_factory(5))
+        test_exporter.define_queryset.assert_not_called()
+
     def test_export_calls_process_queryset(self, test_exporter):
         test_exporter.export()
         test_exporter._process_queryset.assert_called()
@@ -115,3 +119,15 @@ class TestBigQueryExporter:
         for original, processed in zip(mock_queryset, processed_data):
             assert processed['field_value'] == 1
             assert processed['custom_field'] == 2
+
+    def test_export_raises_type_error_for_invalid_pull_date_type(self, test_exporter):
+        with pytest.raises(TypeError) as exc_info:
+            # Passing a string instead of datetime
+            test_exporter.export(pull_date='2025-01-01')
+        assert 'Expected a datetime.datetime object for pull_date, but got str instead' in str(exc_info.value)
+
+    def test_export_raises_type_error_for_invalid_queryset_type(self, test_exporter, mock_model):
+        with pytest.raises(TypeError) as exc_info:
+            # Passing a list containing a model instance instead of QuerySet
+            test_exporter.export(queryset=[mock_model()])
+        assert 'Expected a Django QuerySet, but got list instead' in str(exc_info.value)

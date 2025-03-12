@@ -9,6 +9,8 @@ from google.api_core.retry import Retry
 
 from bigquery_exporter.errors import BigQueryExporterInitError, BigQueryExporterValidationError
 
+from django.db.models import QuerySet
+
 logger = logging.getLogger(__name__)
 
 
@@ -91,24 +93,41 @@ class BigQueryExporter:
         """
         return self.model.objects.all().order_by('id')
 
-    def export(self, pull_date=None):
+    def export(self, pull_date=None, queryset=None):
         """
         Export data to BigQuery.
 
         Args:
             pull_date (datetime.datetime, optional): The datetime used to populate the pull_date field.
                 If not provided, the current date and time will be used.
+            queryset (django.db.models.QuerySet, optional): A Django QuerySet to export.
+                If not provided, the method will use a default queryset defined by `define_queryset()`.
 
         Raises:
+            TypeError: If `pull_date` is provided but is not an instance of datetime.datetime,
+                       or if `queryset` is provided but is not an instance of django.db.models.QuerySet.
+            GoogleAPICallError: If an error occurs during the Google API call while exporting data.
+            RetryError: If a retryable error occurs during the export process.
             Exception: If an error occurs while exporting the data.
 
         Returns:
             errors: A list of errors that occurred while exporting the data.
         """
+        # Set default values
         pull_time = datetime.datetime.now() if not pull_date else pull_date
+        queryset = self.define_queryset() if not queryset else queryset
+
+        # Validate pull_date type if provided (not None)
+        if pull_date is not None and not isinstance(pull_date, datetime.datetime):
+            raise TypeError(f'Expected a datetime.datetime object for pull_date, but got {type(pull_date).__name__} instead.')
+
+        # Validate queryset type before entering the try block
+        if not isinstance(queryset, QuerySet):
+            raise TypeError(f'Expected a Django QuerySet, but got {type(queryset).__name__} instead.')
+
+        # Handle the export process with runtime errors
         errors = []
         try:
-            queryset = self.define_queryset()
             for start, end, total, qs in batch_qs(queryset, self.batch):
                 logger.info(f'Processing {start} - {end} of {total} {self.model}')
                 if reporting_data := self._process_queryset(qs, pull_time):
