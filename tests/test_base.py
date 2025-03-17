@@ -32,19 +32,33 @@ class TestBatchQS:
         assert len(batches) == 1
         assert batches[0] == (0, 5, 5, [1, 2, 3, 4, 5])
 
+    def test_batch_qs_with_batch_size_none(self, qs_factory):
+        """
+        Verify that when batch_size is None, one batch is returned
+        that contains the entire queryset.
+        """
+        mock_qs = qs_factory(10)
+        batches = list(batch_qs(mock_qs, batch_size=None))
+        assert len(batches) == 1
+        # Assert start, end, total, and that queryset is the original mock_qs
+        assert batches[0] == (0, 10, 10, mock_qs)
+        # Verify the queryset contents
+        assert list(batches[0][3]) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
 
 @pytest.fixture
 def test_exporter_factory(mocker, mock_client, mock_model, qs_factory):
-    def create_test_exporter(num_querysets=5, table='test_table'):
+    def create_test_exporter(qs_size=5, table='test_table', batch_size=1000, qs_ordered=True):
         class TestExporter(BigQueryExporter):
             model = mock_model
             table_name = table
+            batch = batch_size
 
         exporter = TestExporter()
         exporter.client = mock_client
         exporter.model = mock_model
         exporter.define_queryset = mocker.MagicMock()
-        exporter.define_queryset.return_value = qs_factory(num_querysets)
+        exporter.define_queryset.return_value = qs_factory(qs_size, qs_ordered)
         exporter._process_queryset = mocker.MagicMock()
         exporter._push_to_bigquery = mocker.MagicMock()
         return exporter
@@ -60,6 +74,10 @@ class TestBigQueryExporter:
     def test_export_calls_define_queryset(self, test_exporter):
         test_exporter.export()
         test_exporter.define_queryset.assert_called_once()
+
+    def test_export_does_not_call_define_queryset_when_queryset_provided(self, test_exporter, qs_factory):
+        test_exporter.export(queryset=qs_factory(5))
+        test_exporter.define_queryset.assert_not_called()
 
     def test_export_calls_process_queryset(self, test_exporter):
         test_exporter.export()
@@ -115,3 +133,21 @@ class TestBigQueryExporter:
         for original, processed in zip(mock_queryset, processed_data):
             assert processed['field_value'] == 1
             assert processed['custom_field'] == 2
+
+    def test_export_raises_type_error_for_invalid_pull_date_type(self, test_exporter):
+        with pytest.raises(TypeError) as exc_info:
+            # Passing a string instead of datetime
+            test_exporter.export(pull_date='2025-01-01')
+        assert 'Expected a datetime.datetime object for pull_date, but got str instead' in str(exc_info.value)
+
+    def test_export_raises_type_error_for_invalid_queryset_type(self, test_exporter, mock_model):
+        with pytest.raises(TypeError) as exc_info:
+            # Passing a list containing a model instance instead of QuerySet
+            test_exporter.export(queryset=[mock_model()])
+        assert 'Expected a Django QuerySet, but got list instead' in str(exc_info.value)
+
+    def test_export_raises_value_error_when_unordered_queryset_larger_than_batch(self, test_exporter_factory):
+        test_exporter = test_exporter_factory(qs_size=5, batch_size=3, qs_ordered=False)
+        with pytest.raises(ValueError) as exc_info:
+            test_exporter.export()
+        assert 'Queryset must be ordered (using .order_by()) when batch size (3) is smaller than queryset size (5)' in str(exc_info.value)

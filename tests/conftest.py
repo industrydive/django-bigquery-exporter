@@ -6,8 +6,9 @@ from google.cloud import bigquery
 
 @pytest.fixture
 def qs_factory(mocker):
-    def _qs_factory(size):
+    def _qs_factory(size, ordered=True):
         mock_qs = mocker.MagicMock(spec=models.QuerySet)
+        mock_qs.ordered = ordered
         if size == 0:
             mock_qs.__iter__.return_value = []
             mock_qs.count.return_value = 0
