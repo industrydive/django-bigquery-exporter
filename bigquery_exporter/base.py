@@ -9,6 +9,8 @@ from google.api_core.retry import Retry
 
 from bigquery_exporter.errors import BigQueryExporterInitError, BigQueryExporterValidationError
 
+from django.db.models import QuerySet
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,6 +31,11 @@ def batch_qs(qs, batch_size=1000):
     queryset. Allows for fetching of large querysets in batches without loading
     the entire queryset into memory at once.
 
+    Args:
+        qs (django.db.models.QuerySet): The Django QuerySet to batch.
+        batch_size (int, optional): The size of each batch. Defaults to 1000.
+                                    If None, the entire queryset is returned in a single batch.
+
     Usage:
         # Make sure to order your queryset
         article_qs = Article.objects.order_by('id')
@@ -38,9 +45,13 @@ def batch_qs(qs, batch_size=1000):
                 print article.body
     """
     total = qs.count()
-    for start in range(0, total, batch_size):
-        end = min(start + batch_size, total)
-        yield (start, end, total, qs[start:end])
+
+    if batch_size is None:
+        yield (0, total, total, qs)
+    else:
+        for start in range(0, total, batch_size):
+            end = min(start + batch_size, total)
+            yield (start, end, total, qs[start:end])
 
 
 class BigQueryExporter:
@@ -91,24 +102,46 @@ class BigQueryExporter:
         """
         return self.model.objects.all().order_by('id')
 
-    def export(self, pull_date=None):
+    def export(self, pull_date=None, queryset=None):
         """
         Export data to BigQuery.
 
         Args:
             pull_date (datetime.datetime, optional): The datetime used to populate the pull_date field.
                 If not provided, the current date and time will be used.
+            queryset (django.db.models.QuerySet, optional): A Django QuerySet to export.
+                If not provided, the method will use a default queryset defined by `define_queryset()`.
 
         Raises:
+            TypeError: If `pull_date` is provided but is not an instance of datetime.datetime,
+                       or if `queryset` is provided but is not an instance of django.db.models.QuerySet.
+            GoogleAPICallError: If an error occurs during the Google API call while exporting data.
+            RetryError: If a retryable error occurs during the export process.
             Exception: If an error occurs while exporting the data.
 
         Returns:
             errors: A list of errors that occurred while exporting the data.
         """
+        # Set default values
         pull_time = datetime.datetime.now() if not pull_date else pull_date
+        queryset = self.define_queryset() if not queryset else queryset
+
+        # Validate pull_date type if provided (not None)
+        if pull_date is not None and not isinstance(pull_date, datetime.datetime):
+            raise TypeError(f'Expected a datetime.datetime object for pull_date, but got {type(pull_date).__name__} instead.')
+
+        # Validate queryset type before entering the try block
+        if not isinstance(queryset, QuerySet):
+            raise TypeError(f'Expected a Django QuerySet, but got {type(queryset).__name__} instead.')
+
+        # Ensure queryset is ordered when batch size is not None and queryset size is larger than batch
+        if (self.batch is not None) and (queryset.count() > self.batch) and not queryset.ordered:
+            raise ValueError('Queryset must be ordered (using .order_by()) when batch size '
+                             f'({self.batch}) is smaller than queryset size ({queryset.count()}).')
+
+        # Handle the export process with runtime errors
         errors = []
         try:
-            queryset = self.define_queryset()
             for start, end, total, qs in batch_qs(queryset, self.batch):
                 logger.info(f'Processing {start} - {end} of {total} {self.model}')
                 if reporting_data := self._process_queryset(qs, pull_time):
