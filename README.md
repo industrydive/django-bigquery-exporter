@@ -214,6 +214,54 @@ The `export()` method returns a list of error objects for any failed row inserti
 
 You can use this information to log errors or retry specific records.
 
+## Testing with Dependency Injection
+
+The BigQueryExporter supports dependency injection for easier testing without relying on actual Google API connections:
+
+```python
+from unittest.mock import MagicMock
+from bigquery_exporter.base import BigQueryExporter
+
+# Create a mock client
+mock_client = MagicMock()
+mock_table = MagicMock()
+mock_table.schema = [MagicMock(name='id'), MagicMock(name='title')]
+mock_client.get_table.return_value = mock_table
+mock_client.insert_rows.return_value = []  # No errors
+
+# Test your exporter with the mock client
+class BookExporter(BigQueryExporter):
+    model = Book
+    fields = ['id', 'title']
+    table_name = 'project.dataset.books'
+
+# Use dependency injection to provide the mock client
+exporter = BookExporter(client=mock_client)
+
+# Now you can test without actual API connections
+results = exporter.export()
+```
+
+You can also inject a custom client factory for more control:
+
+```python
+class TestClientFactory:
+    @staticmethod
+    def create_client(project=None, credentials=None):
+        # Return a pre-configured mock client
+        mock_client = MagicMock()
+        # ... configure mock ...
+        return mock_client
+
+# Use the custom factory
+exporter = BookExporter(client_factory=TestClientFactory)
+```
+
+These approaches make your tests:
+- Faster by avoiding network calls
+- More reliable by removing external dependencies
+- Easier to run in CI/CD environments
+
 ## Best Practices
 
 1. Always define an ordering in `define_queryset()` when using batching
@@ -221,6 +269,7 @@ You can use this information to log errors or retry specific records.
 3. Use custom fields to preprocess data before export
 4. Implement idempotency checks with `table_has_data()`
 5. Catch and handle `GoogleAPICallError` and `BigQueryExporterError` exceptions
+6. Use dependency injection in tests to avoid actual API connections
 
 ## License
 

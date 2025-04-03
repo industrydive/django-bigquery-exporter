@@ -2,7 +2,7 @@ import pytest
 import datetime
 from google.api_core.exceptions import GoogleAPICallError, RetryError
 
-from bigquery_exporter.base import batch_qs, custom_field, BigQueryExporter
+from bigquery_exporter.base import batch_qs, custom_field, BigQueryExporter, BigQueryClientFactory
 
 
 class TestBatchQS:
@@ -46,6 +46,42 @@ class TestBatchQS:
         assert list(batches[0][3]) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 
+class TestBigQueryClientFactory:
+    def test_create_client_with_default_settings(self, mocker):
+        # Mock the bigquery.Client to avoid actual API calls
+        mock_client = mocker.patch('bigquery_exporter.base.bigquery.Client')
+
+        # Call the factory method
+        BigQueryClientFactory.create_client()
+
+        # Verify the client was created with default settings
+        mock_client.assert_called_once_with(project=None)
+
+    def test_create_client_with_project(self, mocker):
+        mock_client = mocker.patch('bigquery_exporter.base.bigquery.Client')
+
+        BigQueryClientFactory.create_client(project='test-project')
+
+        mock_client.assert_called_once_with(project='test-project')
+
+    def test_create_client_with_credentials(self, mocker):
+        mock_client = mocker.patch('bigquery_exporter.base.bigquery.Client')
+        mock_credentials = mocker.patch('bigquery_exporter.base.service_account.Credentials.from_service_account_file')
+        mock_credentials.return_value = 'mock_creds'
+
+        BigQueryClientFactory.create_client(credentials='path/to/credentials.json')
+
+        mock_credentials.assert_called_once_with('path/to/credentials.json')
+        mock_client.assert_called_once_with(project=None, credentials='mock_creds')
+
+    def test_create_client_handles_error(self, mocker):
+        mock_client = mocker.patch('bigquery_exporter.base.bigquery.Client')
+        mock_client.side_effect = GoogleAPICallError('API Error', '')
+
+        with pytest.raises(GoogleAPICallError):
+            BigQueryClientFactory.create_client()
+
+
 @pytest.fixture
 def test_exporter_factory(mocker, mock_client, mock_model, qs_factory):
     def create_test_exporter(qs_size=5, table='test_table', batch_size=1000, qs_ordered=True):
@@ -54,9 +90,7 @@ def test_exporter_factory(mocker, mock_client, mock_model, qs_factory):
             table_name = table
             batch = batch_size
 
-        exporter = TestExporter()
-        exporter.client = mock_client
-        exporter.model = mock_model
+        exporter = TestExporter(client=mock_client)  # Use dependency injection instead of patching
         exporter.define_queryset = mocker.MagicMock()
         exporter.define_queryset.return_value = qs_factory(qs_size, qs_ordered)
         exporter._process_queryset = mocker.MagicMock()
@@ -101,6 +135,59 @@ class TestBigQueryExporter:
             assert 'Error pushing TestExporter' in caplog.text
             assert 'RetryError' in caplog.text
 
+    def test_init_with_custom_client_factory(self, mocker, mock_model):
+        # Create a custom client factory
+        custom_factory = mocker.MagicMock()
+        mock_client = mocker.MagicMock()
+        mock_client.get_table.return_value = mocker.MagicMock(schema=[])
+        custom_factory.create_client.return_value = mock_client
+
+        # Initialize exporter with custom factory
+        class TestExporter(BigQueryExporter):
+            model = mock_model
+            table_name = 'test_table'
+            fields = []
+
+        exporter = TestExporter(client_factory=custom_factory)
+
+        # Verify the custom factory was used
+        custom_factory.create_client.assert_called_once()
+        assert exporter.client == mock_client
+
+    def test_init_with_direct_client_injection(self, mocker, mock_model):
+        # Create a mock client
+        mock_client = mocker.MagicMock()
+        mock_client.get_table.return_value = mocker.MagicMock(schema=[])
+
+        # Initialize exporter with direct client injection
+        class TestExporter(BigQueryExporter):
+            model = mock_model
+            table_name = 'test_table'
+            fields = []
+
+        exporter = TestExporter(client=mock_client)
+
+        # Verify the injected client is used directly without creating a new one
+        assert exporter.client == mock_client
+
+    def test_init_client_factory_precedence(self, mocker, mock_model):
+        """Test that providing both client and client_factory uses the client."""
+        mock_client = mocker.MagicMock()
+        mock_client.get_table.return_value = mocker.MagicMock(schema=[])
+
+        mock_factory = mocker.MagicMock()
+
+        class TestExporter(BigQueryExporter):
+            model = mock_model
+            table_name = 'test_table'
+            fields = []
+
+        exporter = TestExporter(client=mock_client, client_factory=mock_factory)
+
+        # The factory should not be called when a client is directly provided
+        mock_factory.create_client.assert_not_called()
+        assert exporter.client == mock_client
+
     def test_custom_field_decorator_sets_custom_attribute_on_callable(self):
         @custom_field
         def test_field(self, obj):
@@ -112,7 +199,6 @@ class TestBigQueryExporter:
         mock_model.field_value = 1
         # mock the client to return a table with the field 'field_value' and 'custom_field'
         mock_client = bigquery_client_factory('test_table', ['field_value', 'custom_field'])
-        mocker.patch('bigquery_exporter.base.bigquery.Client', return_value=mock_client)
 
         class TestBigQueryExporter(BigQueryExporter):
             model = mock_model
@@ -123,8 +209,8 @@ class TestBigQueryExporter:
             def custom_field(self, obj):
                 return obj.field_value * 2
 
-        # make sure we're mocking bigquery.Client
-        exporter = TestBigQueryExporter()
+        # Use dependency injection instead of mocking the Client constructor
+        exporter = TestBigQueryExporter(client=mock_client)
         mock_queryset = [mock_model]
         pull_time = datetime.datetime(2023, 1, 1, 0, 0, 0)
         processed_data = exporter._process_queryset(mock_queryset, pull_time)
@@ -151,3 +237,48 @@ class TestBigQueryExporter:
         with pytest.raises(ValueError) as exc_info:
             test_exporter.export()
         assert 'Queryset must be ordered (using .order_by()) when batch size (3) is smaller than queryset size (5)' in str(exc_info.value)
+
+    def test_end_to_end_with_dependency_injection(self, mocker, mock_model, bigquery_client_factory):
+        """Test the entire export process using dependency injection pattern for easier testing."""
+        # Setup test data
+        mock_model.id = 100
+        mock_model.name = "Test Item"
+        mock_model.date_created = datetime.datetime(2023, 1, 1)
+
+        # Create a queryable mock
+        mock_queryset = mocker.MagicMock()
+        mock_queryset.count.return_value = 1
+        mock_queryset.__getitem__.return_value = [mock_model]
+        mock_queryset.__iter__.return_value = [mock_model]
+
+        # Setup all method to return our queryable mock
+        mock_all = mocker.patch.object(mock_model.objects, 'all')
+        mock_all.return_value.order_by.return_value = mock_queryset
+
+        # Create a test table with appropriate schema
+        mock_client = bigquery_client_factory('test.table', ['id', 'name', 'date_created', 'pull_date'])
+
+        # Setup our exporter class with a custom field
+        class TestExporter(BigQueryExporter):
+            model = mock_model
+            table_name = 'test.table'
+            fields = ['id', 'name', 'date_created']
+
+        # Use dependency injection to create the exporter with our mock client
+        exporter = TestExporter(client=mock_client)
+
+        # Run the export
+        errors = exporter.export(pull_date=datetime.datetime(2023, 1, 15))
+
+        # Verify results
+        assert errors == []
+
+        # Check mock_client.insert_rows was called with the correct data
+        args, _ = mock_client.insert_rows.call_args
+        inserted_data = args[1]
+
+        assert len(inserted_data) == 1
+        assert inserted_data[0]['id'] == 100
+        assert inserted_data[0]['name'] == "Test Item"
+        assert inserted_data[0]['date_created'] == "2023-01-01 00:00:00"
+        assert inserted_data[0]['pull_date'] == "2023-01-15 00:00:00"

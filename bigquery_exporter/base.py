@@ -54,6 +54,34 @@ def batch_qs(qs, batch_size=1000):
             yield (start, end, total, qs[start:end])
 
 
+class BigQueryClientFactory:
+    """
+    Factory class for creating BigQuery clients.
+    This allows for easier mocking in tests.
+    """
+    @staticmethod
+    def create_client(project=None, credentials=None):
+        """
+        Create a BigQuery client.
+
+        Args:
+            project (str, optional): The Google Cloud project id.
+            credentials (str, optional): The path to the service account credentials file.
+
+        Returns:
+            google.cloud.bigquery.Client: A BigQuery client.
+        """
+        try:
+            if credentials:  # use service account credentials if provided
+                service_account_info = service_account.Credentials.from_service_account_file(credentials)
+                return bigquery.Client(project=project, credentials=service_account_info)
+            else:  # otherwise, use default credentials
+                return bigquery.Client(project=project)
+        except GoogleAPICallError as e:
+            logging.error(f'Error while creating BigQuery client: {e}')
+            raise BigQueryExporterInitError(e)
+
+
 class BigQueryExporter:
     """
     Base class for exporting Django models to BigQuery.
@@ -63,8 +91,9 @@ class BigQueryExporter:
     batch = 1000
     table_name = ''
     replace_nulls_with_empty = False
+    client_factory = BigQueryClientFactory
 
-    def __init__(self, project=None, credentials=None):
+    def __init__(self, project=None, credentials=None, client=None, client_factory=None):
         """
         Initializes the BigQueryExporter.
 
@@ -73,6 +102,10 @@ class BigQueryExporter:
                 will be used.
             credentials (str, optional): The path to the service account credentials file. If not provided,
                 the default credentials will be used.
+            client (google.cloud.bigquery.Client, optional): A pre-configured BigQuery client.
+                If provided, project and credentials are ignored.
+            client_factory (callable, optional): A factory function or class for creating the BigQuery client.
+                If provided, the default factory will be overridden.
 
         Raises:
             BigQueryExporterInitError: If an error occurs while initializing the BigQuery client.
@@ -82,7 +115,12 @@ class BigQueryExporter:
         assert self.model is not None, 'Model is not defined'
         assert self.table_name != '', 'BigQuery table name is not defined'
         logger.info(f'Initializing BigQuery client for {self.__class__.__name__}')
-        self._initialize_client(project, credentials)
+
+        # Allow overriding the client factory for testing
+        if client_factory is not None:
+            self.client_factory = client_factory
+
+        self._initialize_client(project, credentials, client)
         logger.info(f'Validating fields for {self.__class__.__name__}')
         self._validate_fields()
 
@@ -178,16 +216,18 @@ class BigQueryExporter:
             return row[0] > 0
         return False
 
-    def _initialize_client(self, project=None, credentials=None):
+    def _initialize_client(self, project=None, credentials=None, client=None):
         try:
-            if credentials:  # use service account credentials if provided
-                service_account_info = service_account.Credentials.from_service_account_file(credentials)
-                self.client = bigquery.Client(project=project, credentials=service_account_info)
-            else:  # otherwise, use default credentials
-                self.client = bigquery.Client(project=project)
+            # Use the provided client if available
+            if client is not None:
+                self.client = client
+            else:
+                # Otherwise create a client using the factory
+                self.client = self.client_factory.create_client(project, credentials)
+
             self.table = self.client.get_table(self.table_name)
         except GoogleAPICallError as e:
-            logging.error(f'Error while creating BigQuery client: {e}')
+            logging.error(f'Error while initializing BigQuery client: {e}')
             raise BigQueryExporterInitError(e)
 
     def _push_to_bigquery(self, data, retry_deadline=600):

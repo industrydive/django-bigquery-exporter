@@ -31,6 +31,14 @@ def bigquery_client_factory(mocker):
         table = mocker.MagicMock(table_name=table_name, schema=schema)
         # Setting up the client to return the mocked table
         client.get_table.return_value = table
+        # Setup mock query functionality
+        mock_query_job = mocker.MagicMock()
+        mock_result = mocker.MagicMock()
+        mock_result.__iter__.return_value = [(0,)]  # Default to empty table
+        mock_query_job.result.return_value = mock_result
+        client.query.return_value = mock_query_job
+        # Setup insert_rows to return empty list (no errors)
+        client.insert_rows.return_value = []
 
         return client
 
@@ -39,10 +47,21 @@ def bigquery_client_factory(mocker):
 
 @pytest.fixture
 def mock_client(mocker):
-    client = mocker.patch('bigquery_exporter.base.bigquery.Client')
+    client = mocker.Mock(spec=bigquery.Client)
     table = mocker.MagicMock()
     table.schema = [mocker.MagicMock(name='field1'), mocker.MagicMock(name='field2')]
     client.get_table.return_value = table
+
+    # Setup mock query functionality
+    mock_query_job = mocker.MagicMock()
+    mock_result = mocker.MagicMock()
+    mock_result.__iter__.return_value = [(0,)]  # Default to empty table
+    mock_query_job.result.return_value = mock_result
+    client.query.return_value = mock_query_job
+
+    # Setup insert_rows to return empty list (no errors)
+    client.insert_rows.return_value = []
+
     return client
 
 
@@ -54,3 +73,15 @@ def mock_model(mocker):
     model.objects = mocker.MagicMock(spec=models.Manager)
     model.objects.all.return_value = queryset
     return model
+
+
+@pytest.fixture
+def mock_client_factory(mocker, mock_client):
+    """
+    Fixture that provides a mock client factory for testing dependency injection.
+
+    Returns a MagicMock that has a create_client method which returns the mock_client.
+    """
+    factory = mocker.MagicMock()
+    factory.create_client.return_value = mock_client
+    return factory
