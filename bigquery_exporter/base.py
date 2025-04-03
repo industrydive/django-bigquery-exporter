@@ -1,6 +1,7 @@
 import datetime
 import logging
 from uuid import UUID
+import pytz
 from google.cloud import bigquery
 from google.oauth2 import service_account
 from google.api_core.exceptions import GoogleAPICallError
@@ -63,6 +64,8 @@ class BigQueryExporter:
     batch = 1000
     table_name = ''
     replace_nulls_with_empty = False
+    include_pull_date = False
+    pull_date_field_name = 'pull_date'
 
     def __init__(self, project=None, credentials=None):
         """
@@ -168,8 +171,15 @@ class BigQueryExporter:
         Returns:
             bool: True if the table has data for the given pull_date, False otherwise.
         """
-        if pull_date:
-            query = f'SELECT COUNT(*) FROM {self.table_name} WHERE DATE(pull_date) = "{pull_date.strftime("%Y-%m-%d")}"'
+        if pull_date and self.include_pull_date:
+            # Convert pull_date to UTC if it has timezone info
+            if pull_date.tzinfo is not None:
+                utc_date = pull_date.astimezone(pytz.UTC)
+            else:
+                # If naive datetime (no timezone), assume it's in UTC
+                utc_date = pytz.UTC.localize(pull_date)
+
+            query = f'SELECT COUNT(*) FROM {self.table_name} WHERE DATE({self.pull_date_field_name}) = "{utc_date.strftime("%Y-%m-%d")}"'
         else:
             query = f'SELECT COUNT(*) FROM {self.table_name}'
         query_job = self.client.query(query)
@@ -201,7 +211,9 @@ class BigQueryExporter:
     def _process_queryset(self, queryset, pull_time):
         processed_queryset = []
         for model_instance in queryset:
-            processed_dict = {'pull_date': pull_time.strftime('%Y-%m-%d %H:%M:%S')}
+            processed_dict = {}
+            if self.include_pull_date:
+                processed_dict[self.pull_date_field_name] = self._sanitize_value(pull_time)
             for field in self.fields:
                 processed_dict[field] = self._process_field(model_instance, field)
             processed_queryset.append(processed_dict)
@@ -219,6 +231,7 @@ class BigQueryExporter:
         """
         Sanitizes db values to be BigQuery compliant. Converts datetimes and UUIDs to strings.
         Checks for null values and replaces them with empty strings if replace_nulls_with_empty is True.
+        Ensures all datetime objects are in UTC before converting to strings.
 
         Args:
             value: The value to be sanitized.
@@ -227,7 +240,13 @@ class BigQueryExporter:
 
         """
         if isinstance(value, datetime.datetime):
-            return value.strftime('%Y-%m-%d %H:%M:%S')
+            # Convert datetime to UTC if it has timezone info
+            if value.tzinfo is not None:
+                utc_value = value.astimezone(pytz.UTC)
+            else:
+                # If naive datetime (no timezone), assume it's in UTC
+                utc_value = pytz.UTC.localize(value)
+            return utc_value.strftime('%Y-%m-%d %H:%M:%S')
         elif isinstance(value, UUID):
             return str(value)
         elif value is None:
