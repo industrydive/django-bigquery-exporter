@@ -127,7 +127,7 @@ class BigQueryExporter:
             errors: A list of errors that occurred while exporting the data.
         """
         # Set default values
-        pull_time = datetime.datetime.now() if not pull_date else pull_date
+        pull_datetime = datetime.datetime.now() if not pull_date else pull_date
         queryset = self.define_queryset() if not queryset else queryset
 
         # Validate pull_date type if provided (not None)
@@ -148,14 +148,14 @@ class BigQueryExporter:
         try:
             for start, end, total, qs in batch_qs(queryset, self.batch):
                 logger.info(f'Processing {start} - {end} of {total} {self.model}')
-                if reporting_data := self._process_queryset(qs, pull_time):
+                if reporting_data := self._process_queryset(qs, pull_datetime):
                     if batch_errors := self._push_to_bigquery(reporting_data):
                         # updating the row index to account for the batch offset
                         for error in batch_errors:
                             error['index'] += start
                         errors.extend(batch_errors)
 
-            logger.info(f'Finished exporting {len(queryset)} {self.model} in {datetime.datetime.now() - pull_time}')
+            logger.info(f'Finished exporting {len(queryset)} {self.model} in {datetime.datetime.now() - pull_datetime}')
         except (GoogleAPICallError, RetryError) as e:
             logger.error(f'GoogleAPIError while exporting {self.__class__.__name__}: {e}')
             raise e
@@ -209,12 +209,12 @@ class BigQueryExporter:
             logger.error(f'Error pushing {self.__class__.__name__} to {self.table_name}: {e}')
             raise e
 
-    def _process_queryset(self, queryset, pull_time):
+    def _process_queryset(self, queryset, pull_datetime):
         processed_queryset = []
         for model_instance in queryset:
             processed_dict = {}
             if self.include_pull_date:
-                processed_dict[self.pull_date_field_name] = self._sanitize_value(pull_time)
+                processed_dict[self.pull_date_field_name] = self._sanitize_value(pull_datetime)
             for field in self.fields:
                 processed_dict[field] = self._process_field(model_instance, field)
             processed_queryset.append(processed_dict)
