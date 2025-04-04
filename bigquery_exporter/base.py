@@ -167,10 +167,11 @@ class BigQueryExporter:
 
         Args:
             pull_date (datetime.datetime, optional): The pull_date to check for. If not provided,
-                the current date and time will be used.
+                method will check for any 
 
         Returns:
-            bool: True if the table has data for the given pull_date, False otherwise.
+            bool: True if the table has data for a given pull date if one is provided, or any data at all if no pull_date.
+                    False otherwise.
         """
         if pull_date and self.include_pull_date:
             # Convert pull_date to UTC if it has timezone info
