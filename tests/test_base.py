@@ -1,5 +1,6 @@
 import pytest
 import datetime
+import pytz
 from google.api_core.exceptions import GoogleAPICallError, RetryError
 
 from bigquery_exporter.base import batch_qs, custom_field, BigQueryExporter
@@ -133,6 +134,83 @@ class TestBigQueryExporter:
         for original, processed in zip(mock_queryset, processed_data):
             assert processed['field_value'] == 1
             assert processed['custom_field'] == 2
+            assert 'pull_date' not in processed  # pull_date should not be included by default
+
+    def test_process_queryset_with_pull_date(self, bigquery_client_factory, mocker, mock_model):
+        mock_model.field_value = 1
+        # mock the client to return a table with the field 'field_value' and 'pull_date'
+        mock_client = bigquery_client_factory('test_table', ['field_value', 'pull_date'])
+        mocker.patch('bigquery_exporter.base.bigquery.Client', return_value=mock_client)
+
+        class TestBigQueryExporter(BigQueryExporter):
+            model = mock_model
+            table_name = 'test_table'
+            fields = ['field_value']
+            include_pull_date = True
+
+        exporter = TestBigQueryExporter()
+        mock_queryset = [mock_model]
+        pull_time = datetime.datetime(2023, 1, 1, 0, 0, 0)
+        processed_data = exporter._process_queryset(mock_queryset, pull_time)
+
+        assert len(processed_data) == len(mock_queryset)
+        for original, processed in zip(mock_queryset, processed_data):
+            assert processed['field_value'] == 1
+            assert processed['pull_date'] == pull_time.strftime('%Y-%m-%d %H:%M:%S')
+
+    def test_process_queryset_with_custom_pull_date_name(self, bigquery_client_factory, mocker, mock_model):
+        mock_model.field_value = 1
+        # mock the client to return a table with the field 'field_value' and 'export_time'
+        mock_client = bigquery_client_factory('test_table', ['field_value', 'export_time'])
+        mocker.patch('bigquery_exporter.base.bigquery.Client', return_value=mock_client)
+
+        class TestBigQueryExporter(BigQueryExporter):
+            model = mock_model
+            table_name = 'test_table'
+            fields = ['field_value']
+            include_pull_date = True
+            pull_date_field_name = 'export_time'
+
+        exporter = TestBigQueryExporter()
+        mock_queryset = [mock_model]
+        pull_time = datetime.datetime(2023, 1, 1, 0, 0, 0)
+        processed_data = exporter._process_queryset(mock_queryset, pull_time)
+
+        assert len(processed_data) == len(mock_queryset)
+        for original, processed in zip(mock_queryset, processed_data):
+            assert processed['field_value'] == 1
+            assert processed['export_time'] == pull_time.strftime('%Y-%m-%d %H:%M:%S')
+            assert 'pull_date' not in processed
+
+    def test_table_has_data_with_pull_date_disabled(self, test_exporter):
+        """Test table_has_data when include_pull_date is False"""
+        # Run with a pull_date but include_pull_date=False
+        pull_date = datetime.datetime(2023, 1, 1)
+        test_exporter.include_pull_date = False
+        test_exporter.table_has_data(pull_date)
+        # Should call with a basic query without pull_date filter
+        test_exporter.client.query.assert_called_with(f'SELECT COUNT(*) FROM {test_exporter.table_name}')
+
+    def test_table_has_data_with_pull_date_enabled(self, test_exporter):
+        """Test table_has_data when include_pull_date is True"""
+        # Run with a pull_date and include_pull_date=True
+        pull_date = datetime.datetime(2023, 1, 1)
+        test_exporter.include_pull_date = True
+        test_exporter.table_has_data(pull_date)
+        # Should call with a query that filters by pull_date
+        expected_query = f'SELECT COUNT(*) FROM {test_exporter.table_name} WHERE DATE(pull_date) = "2023-01-01"'
+        test_exporter.client.query.assert_called_with(expected_query)
+
+    def test_table_has_data_with_custom_pull_date_name(self, test_exporter):
+        """Test table_has_data with custom pull_date_field_name"""
+        # Run with a pull_date, include_pull_date=True, and custom pull_date_field_name
+        pull_date = datetime.datetime(2023, 1, 1)
+        test_exporter.include_pull_date = True
+        test_exporter.pull_date_field_name = 'export_time'
+        test_exporter.table_has_data(pull_date)
+        # Should call with a query that filters by the custom field name
+        expected_query = f'SELECT COUNT(*) FROM {test_exporter.table_name} WHERE DATE(export_time) = "2023-01-01"'
+        test_exporter.client.query.assert_called_with(expected_query)
 
     def test_export_raises_type_error_for_invalid_pull_date_type(self, test_exporter):
         with pytest.raises(TypeError) as exc_info:
@@ -151,3 +229,91 @@ class TestBigQueryExporter:
         with pytest.raises(ValueError) as exc_info:
             test_exporter.export()
         assert 'Queryset must be ordered (using .order_by()) when batch size (3) is smaller than queryset size (5)' in str(exc_info.value)
+
+    def test_sanitize_value_converts_naive_datetime_to_utc(self, bigquery_client_factory, mocker, mock_model):
+        """Test that naive datetime objects are converted to UTC before stringifying"""
+        # mock the client to return a table with the required fields
+        mock_client = bigquery_client_factory('test_table', ['field_value'])
+        mocker.patch('bigquery_exporter.base.bigquery.Client', return_value=mock_client)
+
+        class TestBigQueryExporter(BigQueryExporter):
+            model = mock_model
+            table_name = 'test_table'
+            fields = []
+
+        exporter = TestBigQueryExporter()
+
+        # Create a naive datetime
+        naive_dt = datetime.datetime(2023, 1, 1, 12, 0, 0)
+        result = exporter._sanitize_value(naive_dt)
+
+        # The result should be a string in the correct format
+        assert isinstance(result, str)
+
+        # The result should be the same time in UTC
+        expected = pytz.UTC.localize(naive_dt).strftime('%Y-%m-%d %H:%M:%S')
+        assert result == expected
+
+    def test_sanitize_value_preserves_aware_datetime_timezone(self, bigquery_client_factory, mocker, mock_model):
+        """Test that timezone-aware datetime objects are correctly converted to UTC"""
+        # mock the client to return a table with the required fields
+        mock_client = bigquery_client_factory('test_table', ['field_value'])
+        mocker.patch('bigquery_exporter.base.bigquery.Client', return_value=mock_client)
+
+        class TestBigQueryExporter(BigQueryExporter):
+            model = mock_model
+            table_name = 'test_table'
+            fields = []
+
+        exporter = TestBigQueryExporter()
+
+        # Create a timezone-aware datetime (UTC+2)
+        # Using pytz to create a timezone-aware datetime
+        utc_plus_2 = pytz.timezone('Europe/Helsinki')  # UTC+2 or +3 depending on DST
+        aware_dt = utc_plus_2.localize(datetime.datetime(2023, 1, 1, 12, 0, 0))  # 12:00 UTC+2
+        result = exporter._sanitize_value(aware_dt)
+
+        # Should be 10:00 UTC (or 9:00 depending on DST)
+        utc_time = aware_dt.astimezone(pytz.UTC)
+        expected = utc_time.strftime('%Y-%m-%d %H:%M:%S')
+        assert result == expected
+
+    def test_process_queryset_applies_utc_conversion_to_pull_date(self, bigquery_client_factory, mocker, mock_model):
+        """Test that pull_date is properly converted to UTC in _process_queryset"""
+        mock_model.field_value = 1
+        # mock the client to return a table with the required fields
+        mock_client = bigquery_client_factory('test_table', ['field_value', 'pull_date'])
+        mocker.patch('bigquery_exporter.base.bigquery.Client', return_value=mock_client)
+
+        class TestBigQueryExporter(BigQueryExporter):
+            model = mock_model
+            table_name = 'test_table'
+            fields = []
+            include_pull_date = True
+
+        exporter = TestBigQueryExporter()
+        mock_queryset = [mock_model]
+
+        # Create a timezone-aware datetime (UTC+2)
+        utc_plus_2 = pytz.timezone('Europe/Helsinki')  # UTC+2 or +3 depending on DST
+        pull_time = utc_plus_2.localize(datetime.datetime(2023, 1, 1, 12, 0, 0))  # 12:00 UTC+2
+
+        processed_data = exporter._process_queryset(mock_queryset, pull_time)
+
+        # Pull date should be converted to UTC
+        utc_time = pull_time.astimezone(pytz.UTC)
+        expected = utc_time.strftime('%Y-%m-%d %H:%M:%S')
+        assert processed_data[0]['pull_date'] == expected
+
+    def test_table_has_data_converts_timezone_aware_datetime(self, test_exporter):
+        """Test table_has_data correctly converts timezone-aware datetime to UTC"""
+        # Create a timezone-aware datetime (UTC+2)
+        utc_plus_2 = pytz.timezone('Europe/Helsinki')  # UTC+2 or +3 depending on DST
+        pull_date = utc_plus_2.localize(datetime.datetime(2023, 1, 1, 12, 0, 0))  # 12:00 UTC+2
+
+        test_exporter.include_pull_date = True
+        test_exporter.table_has_data(pull_date)
+
+        # Should query with UTC date (Jan 1, not Jan 1 + timezone offset)
+        expected_query = f'SELECT COUNT(*) FROM {test_exporter.table_name} WHERE DATE(pull_date) = "2023-01-01"'
+        test_exporter.client.query.assert_called_with(expected_query)

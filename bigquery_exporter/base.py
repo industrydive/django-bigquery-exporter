@@ -1,6 +1,7 @@
 import datetime
 import logging
 from uuid import UUID
+import pytz
 from google.cloud import bigquery
 from google.oauth2 import service_account
 from google.api_core.exceptions import GoogleAPICallError
@@ -8,6 +9,7 @@ from google.api_core.exceptions import RetryError
 from google.api_core.retry import Retry
 
 from bigquery_exporter.errors import BigQueryExporterInitError, BigQueryExporterValidationError
+from bigquery_exporter.helpers import handle_datetime_value
 
 from django.db.models import QuerySet
 
@@ -63,6 +65,8 @@ class BigQueryExporter:
     batch = 1000
     table_name = ''
     replace_nulls_with_empty = False
+    include_pull_date = False
+    pull_date_field_name = 'pull_date'
 
     def __init__(self, project=None, credentials=None):
         """
@@ -123,7 +127,7 @@ class BigQueryExporter:
             errors: A list of errors that occurred while exporting the data.
         """
         # Set default values
-        pull_time = datetime.datetime.now() if not pull_date else pull_date
+        pull_datetime = datetime.datetime.now() if not pull_date else pull_date
         queryset = self.define_queryset() if not queryset else queryset
 
         # Validate pull_date type if provided (not None)
@@ -144,14 +148,14 @@ class BigQueryExporter:
         try:
             for start, end, total, qs in batch_qs(queryset, self.batch):
                 logger.info(f'Processing {start} - {end} of {total} {self.model}')
-                if reporting_data := self._process_queryset(qs, pull_time):
+                if reporting_data := self._process_queryset(qs, pull_datetime):
                     if batch_errors := self._push_to_bigquery(reporting_data):
                         # updating the row index to account for the batch offset
                         for error in batch_errors:
                             error['index'] += start
                         errors.extend(batch_errors)
 
-            logger.info(f'Finished exporting {len(queryset)} {self.model} in {datetime.datetime.now() - pull_time}')
+            logger.info(f'Finished exporting {len(queryset)} {self.model} in {datetime.datetime.now() - pull_datetime}')
         except (GoogleAPICallError, RetryError) as e:
             logger.error(f'GoogleAPIError while exporting {self.__class__.__name__}: {e}')
             raise e
@@ -163,13 +167,21 @@ class BigQueryExporter:
 
         Args:
             pull_date (datetime.datetime, optional): The pull_date to check for. If not provided,
-                the current date and time will be used.
+                method will check for any 
 
         Returns:
-            bool: True if the table has data for the given pull_date, False otherwise.
+            bool: True if the table has data for a given pull date if one is provided, or any data at all if no pull_date.
+                    False otherwise.
         """
-        if pull_date:
-            query = f'SELECT COUNT(*) FROM {self.table_name} WHERE DATE(pull_date) = "{pull_date.strftime("%Y-%m-%d")}"'
+        if pull_date and self.include_pull_date:
+            # Convert pull_date to UTC if it has timezone info
+            if pull_date.tzinfo is not None:
+                utc_date = pull_date.astimezone(pytz.UTC)
+            else:
+                # If naive datetime (no timezone), assume it's in UTC
+                utc_date = pytz.UTC.localize(pull_date)
+
+            query = f'SELECT COUNT(*) FROM {self.table_name} WHERE DATE({self.pull_date_field_name}) = "{utc_date.strftime("%Y-%m-%d")}"'
         else:
             query = f'SELECT COUNT(*) FROM {self.table_name}'
         query_job = self.client.query(query)
@@ -198,10 +210,12 @@ class BigQueryExporter:
             logger.error(f'Error pushing {self.__class__.__name__} to {self.table_name}: {e}')
             raise e
 
-    def _process_queryset(self, queryset, pull_time):
+    def _process_queryset(self, queryset, pull_datetime):
         processed_queryset = []
         for model_instance in queryset:
-            processed_dict = {'pull_date': pull_time.strftime('%Y-%m-%d %H:%M:%S')}
+            processed_dict = {}
+            if self.include_pull_date:
+                processed_dict[self.pull_date_field_name] = self._sanitize_value(pull_datetime)
             for field in self.fields:
                 processed_dict[field] = self._process_field(model_instance, field)
             processed_queryset.append(processed_dict)
@@ -219,6 +233,7 @@ class BigQueryExporter:
         """
         Sanitizes db values to be BigQuery compliant. Converts datetimes and UUIDs to strings.
         Checks for null values and replaces them with empty strings if replace_nulls_with_empty is True.
+        Ensures all datetime objects are in UTC before converting to strings.
 
         Args:
             value: The value to be sanitized.
@@ -227,7 +242,8 @@ class BigQueryExporter:
 
         """
         if isinstance(value, datetime.datetime):
-            return value.strftime('%Y-%m-%d %H:%M:%S')
+            # Convert datetime to UTC if it has timezone info
+            return handle_datetime_value(value)
         elif isinstance(value, UUID):
             return str(value)
         elif value is None:
