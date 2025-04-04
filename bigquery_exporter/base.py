@@ -9,6 +9,7 @@ from google.api_core.exceptions import RetryError
 from google.api_core.retry import Retry
 
 from bigquery_exporter.errors import BigQueryExporterInitError, BigQueryExporterValidationError
+from bigquery_exporter.helpers import handle_datetime_value
 
 from django.db.models import QuerySet
 
@@ -241,12 +242,7 @@ class BigQueryExporter:
         """
         if isinstance(value, datetime.datetime):
             # Convert datetime to UTC if it has timezone info
-            if value.tzinfo is not None:
-                utc_value = value.astimezone(pytz.UTC)
-            else:
-                # If naive datetime (no timezone), assume it's in UTC
-                utc_value = pytz.UTC.localize(value)
-            return utc_value.strftime('%Y-%m-%d %H:%M:%S')
+            handle_datetime_value(value)
         elif isinstance(value, UUID):
             return str(value)
         elif value is None:
