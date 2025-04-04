@@ -317,3 +317,157 @@ class TestBigQueryExporter:
         # Should query with UTC date (Jan 1, not Jan 1 + timezone offset)
         expected_query = f'SELECT COUNT(*) FROM {test_exporter.table_name} WHERE DATE(pull_date) = "2023-01-01"'
         test_exporter.client.query.assert_called_with(expected_query)
+
+    def test_sanitize_value_with_type_specific_defaults(self, mocker):
+        """Test _sanitize_value with replace_nulls_with_empty=True and different field types"""
+        # Create mock schema fields with proper attributes
+        string_field = mocker.MagicMock()
+        string_field.name = 'string_field'
+        string_field.field_type = 'STRING'
+
+        integer_field = mocker.MagicMock()
+        integer_field.name = 'integer_field'
+        integer_field.field_type = 'INTEGER'
+
+        float_field = mocker.MagicMock()
+        float_field.name = 'float_field'
+        float_field.field_type = 'FLOAT'
+
+        boolean_field = mocker.MagicMock()
+        boolean_field.name = 'boolean_field'
+        boolean_field.field_type = 'BOOLEAN'
+
+        json_field = mocker.MagicMock()
+        json_field.name = 'json_field'
+        json_field.field_type = 'JSON'
+
+        unknown_field = mocker.MagicMock()
+        unknown_field.name = 'unknown_field'
+        unknown_field.field_type = 'UNKNOWN_TYPE'
+
+        # Create a mock table with fields of different types
+        mock_table = mocker.MagicMock()
+        mock_table.schema = [
+            string_field,
+            integer_field,
+            float_field,
+            boolean_field,
+            json_field,
+            unknown_field
+        ]
+
+        # Create a mock exporter with replace_nulls_with_empty=True
+        mock_client = mocker.MagicMock()
+        mock_client.get_table.return_value = mock_table
+
+        class TestExporter(BigQueryExporter):
+            model = mocker.MagicMock()
+            table_name = 'test_table'
+            fields = []
+            replace_nulls_with_empty = True
+
+        # Mock the client creation to avoid actual API calls
+        mocker.patch('bigquery_exporter.base.bigquery.Client', return_value=mock_client)
+
+        exporter = TestExporter()
+        exporter.table = mock_table  # Set the table directly
+
+        # Test with None values for different field types
+        assert exporter._sanitize_value(None, 'string_field') == ''
+        assert exporter._sanitize_value(None, 'integer_field') == 0
+        assert exporter._sanitize_value(None, 'float_field') == 0.0
+        assert exporter._sanitize_value(None, 'boolean_field') is False
+        assert exporter._sanitize_value(None, 'json_field') == '{}'
+        # Unknown type should default to empty string
+        assert exporter._sanitize_value(None, 'unknown_field') == ''
+        # Field not in schema should default to empty string
+        assert exporter._sanitize_value(None, 'nonexistent_field') == ''
+
+    def test_sanitize_value_with_none_values_disabled_replacement(self, mocker):
+        """Test _sanitize_value with replace_nulls_with_empty=False"""
+        # Create mock schema fields with proper attributes
+        string_field = mocker.MagicMock()
+        string_field.name = 'string_field'
+        string_field.field_type = 'STRING'
+
+        integer_field = mocker.MagicMock()
+        integer_field.name = 'integer_field'
+        integer_field.field_type = 'INTEGER'
+
+        # Create a mock table
+        mock_table = mocker.MagicMock()
+        mock_table.schema = [
+            string_field,
+            integer_field
+        ]
+
+        # Create a mock exporter with replace_nulls_with_empty=False
+        mock_client = mocker.MagicMock()
+        mock_client.get_table.return_value = mock_table
+
+        class TestExporter(BigQueryExporter):
+            model = mocker.MagicMock()
+            table_name = 'test_table'
+            fields = []
+            replace_nulls_with_empty = False
+
+        # Mock the client creation to avoid actual API calls
+        mocker.patch('bigquery_exporter.base.bigquery.Client', return_value=mock_client)
+
+        exporter = TestExporter()
+        exporter.table = mock_table  # Set the table directly
+
+        # Test with None values - should remain None
+        assert exporter._sanitize_value(None, 'string_field') is None
+        assert exporter._sanitize_value(None, 'integer_field') is None
+        assert exporter._sanitize_value(None, 'nonexistent_field') is None
+
+    def test_sanitize_value_with_non_none_values(self, mocker):
+        """Test _sanitize_value with non-None values (should not be affected by type-specific defaults)"""
+        # Create mock schema fields with proper attributes
+        string_field = mocker.MagicMock()
+        string_field.name = 'string_field'
+        string_field.field_type = 'STRING'
+
+        integer_field = mocker.MagicMock()
+        integer_field.name = 'integer_field'
+        integer_field.field_type = 'INTEGER'
+
+        float_field = mocker.MagicMock()
+        float_field.name = 'float_field'
+        float_field.field_type = 'FLOAT'
+
+        boolean_field = mocker.MagicMock()
+        boolean_field.name = 'boolean_field'
+        boolean_field.field_type = 'BOOLEAN'
+
+        # Create a mock table
+        mock_table = mocker.MagicMock()
+        mock_table.schema = [
+            string_field,
+            integer_field,
+            float_field,
+            boolean_field
+        ]
+
+        # Create a mock exporter with replace_nulls_with_empty=True
+        mock_client = mocker.MagicMock()
+        mock_client.get_table.return_value = mock_table
+
+        class TestExporter(BigQueryExporter):
+            model = mocker.MagicMock()
+            table_name = 'test_table'
+            fields = []
+            replace_nulls_with_empty = True
+
+        # Mock the client creation to avoid actual API calls
+        mocker.patch('bigquery_exporter.base.bigquery.Client', return_value=mock_client)
+
+        exporter = TestExporter()
+        exporter.table = mock_table  # Set the table directly
+
+        # Test with non-None values - should remain unchanged
+        assert exporter._sanitize_value("test", 'string_field') == "test"
+        assert exporter._sanitize_value(42, 'integer_field') == 42
+        assert exporter._sanitize_value(3.14, 'float_field') == 3.14
+        assert exporter._sanitize_value(True, 'boolean_field') is True

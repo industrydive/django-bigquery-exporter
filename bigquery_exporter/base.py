@@ -10,6 +10,7 @@ from google.api_core.retry import Retry
 
 from bigquery_exporter.errors import BigQueryExporterInitError, BigQueryExporterValidationError
 from bigquery_exporter.helpers import handle_datetime_value
+from bigquery_exporter.constants import BQ_TYPE_DEFAULTS
 
 from django.db.models import QuerySet
 
@@ -167,7 +168,7 @@ class BigQueryExporter:
 
         Args:
             pull_date (datetime.datetime, optional): The pull_date to check for. If not provided,
-                method will check for any 
+                method will check for any
 
         Returns:
             bool: True if the table has data for a given pull date if one is provided, or any data at all if no pull_date.
@@ -215,7 +216,7 @@ class BigQueryExporter:
         for model_instance in queryset:
             processed_dict = {}
             if self.include_pull_date:
-                processed_dict[self.pull_date_field_name] = self._sanitize_value(pull_datetime)
+                processed_dict[self.pull_date_field_name] = self._sanitize_value(pull_datetime, self.pull_date_field_name)
             for field in self.fields:
                 processed_dict[field] = self._process_field(model_instance, field)
             processed_queryset.append(processed_dict)
@@ -227,16 +228,17 @@ class BigQueryExporter:
             return exporter_field(model_instance)
         else:
             model_field = getattr(model_instance, field)
-            return self._sanitize_value(model_field)
+            return self._sanitize_value(model_field, field)
 
-    def _sanitize_value(self, value):
+    def _sanitize_value(self, value, field_name=None):
         """
         Sanitizes db values to be BigQuery compliant. Converts datetimes and UUIDs to strings.
-        Checks for null values and replaces them with empty strings if replace_nulls_with_empty is True.
+        Checks for null values and replaces them with appropriate type-specific defaults if replace_nulls_with_empty is True.
         Ensures all datetime objects are in UTC before converting to strings.
 
         Args:
             value: The value to be sanitized.
+            field_name: The name of the field being sanitized (optional, used for type checking).
         Returns:
             The sanitized value.
 
@@ -246,8 +248,19 @@ class BigQueryExporter:
             return handle_datetime_value(value)
         elif isinstance(value, UUID):
             return str(value)
-        elif value is None:
-            return '' if self.replace_nulls_with_empty else None
+        elif value is None and self.replace_nulls_with_empty:
+            # If we don't have a field name, default to empty string
+            if field_name is None:
+                return ''
+
+            # Try to find the field in the table schema
+            for schema_field in self.table.schema:
+                if schema_field.name == field_name:
+                    # Return the appropriate default for this field type
+                    return BQ_TYPE_DEFAULTS.get(schema_field.field_type, '')
+
+            # If field not found in schema, default to empty string
+            return ''
         else:
             return value
 
