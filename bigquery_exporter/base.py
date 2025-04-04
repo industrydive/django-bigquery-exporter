@@ -242,7 +242,7 @@ class BigQueryExporter:
         """
         if isinstance(value, datetime.datetime):
             # Convert datetime to UTC if it has timezone info
-            handle_datetime_value(value)
+            return handle_datetime_value(value)
         elif isinstance(value, UUID):
             return str(value)
         elif value is None:
