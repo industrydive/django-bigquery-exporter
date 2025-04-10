@@ -11,6 +11,8 @@ from google.api_core.retry import Retry
 from bigquery_exporter.errors import BigQueryExporterInitError, BigQueryExporterValidationError
 from bigquery_exporter.helpers import handle_datetime_value
 from bigquery_exporter.constants import BQ_TYPE_DEFAULTS
+from bigquery_exporter.clients.interface import BigQueryClientInterface
+from bigquery_exporter.clients.google_client import GoogleBigQueryClient
 
 from django.db.models import QuerySet
 
@@ -69,7 +71,7 @@ class BigQueryExporter:
     include_pull_date = False
     pull_date_field_name = 'pull_date'
 
-    def __init__(self, project=None, credentials=None):
+    def __init__(self, project=None, credentials=None, client=None):
         """
         Initializes the BigQueryExporter.
 
@@ -78,6 +80,8 @@ class BigQueryExporter:
                 will be used.
             credentials (str, optional): The path to the service account credentials file. If not provided,
                 the default credentials will be used.
+            client (BigQueryClientInterface, optional): A pre-configured BigQuery client instance.
+                If provided, project and credentials are ignored.
 
         Raises:
             BigQueryExporterInitError: If an error occurs while initializing the BigQuery client.
@@ -87,7 +91,7 @@ class BigQueryExporter:
         assert self.model is not None, 'Model is not defined'
         assert self.table_name != '', 'BigQuery table name is not defined'
         logger.info(f'Initializing BigQuery client for {self.__class__.__name__}')
-        self._initialize_client(project, credentials)
+        self._initialize_client(project, credentials, client)
         logger.info(f'Validating fields for {self.__class__.__name__}')
         self._validate_fields()
 
@@ -191,16 +195,25 @@ class BigQueryExporter:
             return row[0] > 0
         return False
 
-    def _initialize_client(self, project=None, credentials=None):
+    def _initialize_client(self, project=None, credentials=None, client=None):
         try:
-            if credentials:  # use service account credentials if provided
-                service_account_info = service_account.Credentials.from_service_account_file(credentials)
-                self.client = bigquery.Client(project=project, credentials=service_account_info)
-            else:  # otherwise, use default credentials
-                self.client = bigquery.Client(project=project)
+            # Use the provided client if available, otherwise create a new one
+            if client is not None:
+                if not isinstance(client, BigQueryClientInterface):
+                    raise TypeError(f"Expected a BigQueryClientInterface instance, got {type(client).__name__}")
+                self.client = client
+            else:
+                self.client = GoogleBigQueryClient(project, credentials)
+
             self.table = self.client.get_table(self.table_name)
+
+            # Create a mapping of field names to their field types
+            # This is more space-efficient than storing the default values
+            self._field_types = {}
+            for schema_field in self.table.schema:
+                self._field_types[schema_field.name] = schema_field.field_type
         except GoogleAPICallError as e:
-            logging.error(f'Error while creating BigQuery client: {e}')
+            logging.error(f'Error while initializing BigQuery client: {e}')
             raise BigQueryExporterInitError(e)
 
     def _push_to_bigquery(self, data, retry_deadline=600):
@@ -253,14 +266,9 @@ class BigQueryExporter:
             if field_name is None:
                 return ''
 
-            # Try to find the field in the table schema
-            for schema_field in self.table.schema:
-                if schema_field.name == field_name:
-                    # Return the appropriate default for this field type
-                    return BQ_TYPE_DEFAULTS.get(schema_field.field_type, '')
-
-            # If field not found in schema, default to empty string
-            return ''
+            # Get the field type and look up the appropriate default value
+            field_type = self._field_types.get(field_name)
+            return BQ_TYPE_DEFAULTS.get(field_type, '')
         else:
             return value
 

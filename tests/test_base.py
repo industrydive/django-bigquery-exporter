@@ -47,26 +47,6 @@ class TestBatchQS:
         assert list(batches[0][3]) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 
-@pytest.fixture
-def test_exporter_factory(mocker, mock_client, mock_model, qs_factory):
-    def create_test_exporter(qs_size=5, table='test_table', batch_size=1000, qs_ordered=True):
-        class TestExporter(BigQueryExporter):
-            model = mock_model
-            table_name = table
-            batch = batch_size
-
-        exporter = TestExporter()
-        exporter.client = mock_client
-        exporter.model = mock_model
-        exporter.define_queryset = mocker.MagicMock()
-        exporter.define_queryset.return_value = qs_factory(qs_size, qs_ordered)
-        exporter._process_queryset = mocker.MagicMock()
-        exporter._push_to_bigquery = mocker.MagicMock()
-        return exporter
-
-    return create_test_exporter
-
-
 class TestBigQueryExporter:
     @pytest.fixture
     def test_exporter(self, test_exporter_factory):
@@ -318,32 +298,15 @@ class TestBigQueryExporter:
         expected_query = f'SELECT COUNT(*) FROM {test_exporter.table_name} WHERE DATE(pull_date) = "2023-01-01"'
         test_exporter.client.query.assert_called_with(expected_query)
 
-    def test_sanitize_value_with_type_specific_defaults(self, mocker):
+    def test_sanitize_value_with_type_specific_defaults(self, bigquery_client_factory, mocker, mock_field_factory):
         """Test _sanitize_value with replace_nulls_with_empty=True and different field types"""
         # Create mock schema fields with proper attributes
-        string_field = mocker.MagicMock()
-        string_field.name = 'string_field'
-        string_field.field_type = 'STRING'
-
-        integer_field = mocker.MagicMock()
-        integer_field.name = 'integer_field'
-        integer_field.field_type = 'INTEGER'
-
-        float_field = mocker.MagicMock()
-        float_field.name = 'float_field'
-        float_field.field_type = 'FLOAT'
-
-        boolean_field = mocker.MagicMock()
-        boolean_field.name = 'boolean_field'
-        boolean_field.field_type = 'BOOLEAN'
-
-        json_field = mocker.MagicMock()
-        json_field.name = 'json_field'
-        json_field.field_type = 'JSON'
-
-        unknown_field = mocker.MagicMock()
-        unknown_field.name = 'unknown_field'
-        unknown_field.field_type = 'UNKNOWN_TYPE'
+        string_field = mock_field_factory('string_field', 'STRING')
+        integer_field = mock_field_factory('integer_field', 'INTEGER')
+        float_field = mock_field_factory('float_field', 'FLOAT')
+        boolean_field = mock_field_factory('boolean_field', 'BOOLEAN')
+        json_field = mock_field_factory('json_field', 'JSON')
+        unknown_field = mock_field_factory('unknown_field', 'UNKNOWN_TYPE')
 
         # Create a mock table with fields of different types
         mock_table = mocker.MagicMock()
@@ -357,8 +320,14 @@ class TestBigQueryExporter:
         ]
 
         # Create a mock exporter with replace_nulls_with_empty=True
-        mock_client = mocker.MagicMock()
-        mock_client.get_table.return_value = mock_table
+        mock_client = bigquery_client_factory('test_table', [
+            string_field,
+            integer_field,
+            float_field,
+            boolean_field,
+            json_field,
+            unknown_field
+        ])
 
         class TestExporter(BigQueryExporter):
             model = mocker.MagicMock()
