@@ -75,7 +75,7 @@ def mock_model(mocker):
 
 @pytest.fixture
 def test_exporter_factory(mocker, mock_model, qs_factory, bigquery_client_factory):
-    def create_test_exporter(qs_size=5, table='test_table', batch_size=1000, qs_ordered=True, client=None, replace_nulls=False):
+    def create_test_exporter(qs_size=5, table='test_table', batch_size=1000, qs_ordered=True, client=None, replace_nulls=False, mock_process_queryset=True):
         class TestExporter(BigQueryExporter):
             model = mock_model
             table_name = table
@@ -88,7 +88,11 @@ def test_exporter_factory(mocker, mock_model, qs_factory, bigquery_client_factor
         exporter = TestExporter(client=client)
         exporter.define_queryset = mocker.MagicMock()
         exporter.define_queryset.return_value = qs_factory(qs_size, qs_ordered)
-        exporter._process_queryset = mocker.MagicMock()
+
+        # Only mock _process_queryset if explicitly requested
+        if mock_process_queryset:
+            exporter._process_queryset = mocker.MagicMock()
+
         exporter._push_to_bigquery = mocker.MagicMock()
         return exporter
 
