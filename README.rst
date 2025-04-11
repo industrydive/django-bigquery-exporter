@@ -17,14 +17,14 @@ Features
 * Handles potential exceptions during data export with detailed error reporting
 
 Installation
------------
+------------
 
 ::
 
     pip install django-bigquery-exporter
 
 Requirements
------------
+------------
 
 * Python 3.8+
 * Django
@@ -32,7 +32,7 @@ Requirements
 * google-api-python-client
 
 Authentication
------------
+--------------
 
 You need to authenticate with Google Cloud to use BigQuery. There are two main ways:
 
@@ -75,7 +75,7 @@ Then, export the data::
     exporter.export()
 
 Available Properties
------------
+--------------------
 
 :model: Django model to export (required), default: ``None``
 :fields: List of field names to export (required), default: ``[]``
@@ -84,10 +84,10 @@ Available Properties
 :replace_nulls_with_empty: Whether to replace ``None`` values with empty strings, default: ``False``
 
 Available Methods
------------
+-----------------
 
 define_queryset()
-~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~
 
 Define the queryset to export. Override this method to filter or order your data::
 
@@ -97,7 +97,7 @@ Define the queryset to export. Override this method to filter or order your data
         return self.model.objects.filter(publication_date__gte=one_year_ago).order_by('id')
 
 export(pull_date=None)
-~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 Export data to BigQuery. The ``pull_date`` parameter can be used to record when the data was exported::
 
@@ -107,7 +107,7 @@ Export data to BigQuery. The ``pull_date`` parameter can be used to record when 
         print(f"Encountered {len(errors)} errors during export")
 
 table_has_data(pull_date=None)
-~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Check if the BigQuery table already has data for a specific pull date::
 
@@ -119,7 +119,7 @@ Check if the BigQuery table already has data for a specific pull date::
         print("Data already exported for today")
 
 Custom Fields
------------
+--------------
 
 Use the ``@custom_field`` decorator to create methods that transform data during export::
 
@@ -137,7 +137,7 @@ Use the ``@custom_field`` decorator to create methods that transform data during
         }
 
 Complete Example
------------
+----------------
 
 Here's a complete example with a Book model::
 
@@ -202,7 +202,7 @@ Here's a complete example with a Book model::
             print(f"Successfully exported books to BigQuery")
 
 Error Handling
------------
+--------------
 
 The ``export()`` method returns a list of error objects for any failed row insertions. Each error includes:
 
@@ -213,7 +213,7 @@ The ``export()`` method returns a list of error objects for any failed row inser
 You can use this information to log errors or retry specific records.
 
 Best Practices
------------
+--------------
 
 1. Always define an ordering in ``define_queryset()`` when using batching
 2. Set appropriate batch sizes based on your model's complexity
@@ -222,6 +222,6 @@ Best Practices
 5. Catch and handle ``GoogleAPICallError`` and ``BigQueryExporterError`` exceptions
 
 License
------------
+-------
 
 This project is licensed under the MIT License - see the LICENSE file for details.
