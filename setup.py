@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     install_requires=[
@@ -8,6 +8,6 @@ setup(
         'pytz >= 2019.1',
     ],
     name='django-bigquery-exporter',
-    packages=['bigquery_exporter'],
+    packages=find_packages(),
     version='0.2.1',
 )
