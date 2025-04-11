@@ -10,6 +10,9 @@ from google.api_core.retry import Retry
 
 from bigquery_exporter.errors import BigQueryExporterInitError, BigQueryExporterValidationError
 from bigquery_exporter.helpers import handle_datetime_value
+from bigquery_exporter.constants import BQ_TYPE_DEFAULTS
+from bigquery_exporter.clients.interface import BigQueryClientInterface
+from bigquery_exporter.clients.google_client import GoogleBigQueryClient
 
 from django.db.models import QuerySet
 
@@ -68,7 +71,7 @@ class BigQueryExporter:
     include_pull_date = False
     pull_date_field_name = 'pull_date'
 
-    def __init__(self, project=None, credentials=None):
+    def __init__(self, project=None, credentials=None, client=None):
         """
         Initializes the BigQueryExporter.
 
@@ -77,6 +80,8 @@ class BigQueryExporter:
                 will be used.
             credentials (str, optional): The path to the service account credentials file. If not provided,
                 the default credentials will be used.
+            client (BigQueryClientInterface, optional): A pre-configured BigQuery client instance.
+                If provided, project and credentials are ignored.
 
         Raises:
             BigQueryExporterInitError: If an error occurs while initializing the BigQuery client.
@@ -86,7 +91,7 @@ class BigQueryExporter:
         assert self.model is not None, 'Model is not defined'
         assert self.table_name != '', 'BigQuery table name is not defined'
         logger.info(f'Initializing BigQuery client for {self.__class__.__name__}')
-        self._initialize_client(project, credentials)
+        self._initialize_client(project, credentials, client)
         logger.info(f'Validating fields for {self.__class__.__name__}')
         self._validate_fields()
 
@@ -167,7 +172,7 @@ class BigQueryExporter:
 
         Args:
             pull_date (datetime.datetime, optional): The pull_date to check for. If not provided,
-                method will check for any 
+                method will check for any
 
         Returns:
             bool: True if the table has data for a given pull date if one is provided, or any data at all if no pull_date.
@@ -190,16 +195,25 @@ class BigQueryExporter:
             return row[0] > 0
         return False
 
-    def _initialize_client(self, project=None, credentials=None):
+    def _initialize_client(self, project=None, credentials=None, client=None):
         try:
-            if credentials:  # use service account credentials if provided
-                service_account_info = service_account.Credentials.from_service_account_file(credentials)
-                self.client = bigquery.Client(project=project, credentials=service_account_info)
-            else:  # otherwise, use default credentials
-                self.client = bigquery.Client(project=project)
+            # Use the provided client if available, otherwise create a new one
+            if client is not None:
+                if not isinstance(client, BigQueryClientInterface):
+                    raise TypeError(f"Expected a BigQueryClientInterface instance, got {type(client).__name__}")
+                self.client = client
+            else:
+                self.client = GoogleBigQueryClient(project, credentials)
+
             self.table = self.client.get_table(self.table_name)
+
+            # Create a mapping of field names to their field types
+            # This is more space-efficient than storing the default values
+            self._field_types = {}
+            for schema_field in self.table.schema:
+                self._field_types[schema_field.name] = schema_field.field_type
         except GoogleAPICallError as e:
-            logging.error(f'Error while creating BigQuery client: {e}')
+            logging.error(f'Error while initializing BigQuery client: {e}')
             raise BigQueryExporterInitError(e)
 
     def _push_to_bigquery(self, data, retry_deadline=600):
@@ -215,7 +229,7 @@ class BigQueryExporter:
         for model_instance in queryset:
             processed_dict = {}
             if self.include_pull_date:
-                processed_dict[self.pull_date_field_name] = self._sanitize_value(pull_datetime)
+                processed_dict[self.pull_date_field_name] = self._sanitize_value(pull_datetime, self.pull_date_field_name)
             for field in self.fields:
                 processed_dict[field] = self._process_field(model_instance, field)
             processed_queryset.append(processed_dict)
@@ -227,16 +241,17 @@ class BigQueryExporter:
             return exporter_field(model_instance)
         else:
             model_field = getattr(model_instance, field)
-            return self._sanitize_value(model_field)
+            return self._sanitize_value(model_field, field)
 
-    def _sanitize_value(self, value):
+    def _sanitize_value(self, value, field_name=None):
         """
         Sanitizes db values to be BigQuery compliant. Converts datetimes and UUIDs to strings.
-        Checks for null values and replaces them with empty strings if replace_nulls_with_empty is True.
+        Checks for null values and replaces them with appropriate type-specific defaults if replace_nulls_with_empty is True.
         Ensures all datetime objects are in UTC before converting to strings.
 
         Args:
             value: The value to be sanitized.
+            field_name: The name of the field being sanitized (optional, used for type checking).
         Returns:
             The sanitized value.
 
@@ -246,8 +261,14 @@ class BigQueryExporter:
             return handle_datetime_value(value)
         elif isinstance(value, UUID):
             return str(value)
-        elif value is None:
-            return '' if self.replace_nulls_with_empty else None
+        elif value is None and self.replace_nulls_with_empty:
+            # If we don't have a field name, default to empty string
+            if field_name is None:
+                return ''
+
+            # Get the field type and look up the appropriate default value
+            field_type = self._field_types.get(field_name)
+            return BQ_TYPE_DEFAULTS.get(field_type, '')
         else:
             return value
 

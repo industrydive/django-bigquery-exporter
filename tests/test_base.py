@@ -47,26 +47,6 @@ class TestBatchQS:
         assert list(batches[0][3]) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 
-@pytest.fixture
-def test_exporter_factory(mocker, mock_client, mock_model, qs_factory):
-    def create_test_exporter(qs_size=5, table='test_table', batch_size=1000, qs_ordered=True):
-        class TestExporter(BigQueryExporter):
-            model = mock_model
-            table_name = table
-            batch = batch_size
-
-        exporter = TestExporter()
-        exporter.client = mock_client
-        exporter.model = mock_model
-        exporter.define_queryset = mocker.MagicMock()
-        exporter.define_queryset.return_value = qs_factory(qs_size, qs_ordered)
-        exporter._process_queryset = mocker.MagicMock()
-        exporter._push_to_bigquery = mocker.MagicMock()
-        return exporter
-
-    return create_test_exporter
-
-
 class TestBigQueryExporter:
     @pytest.fixture
     def test_exporter(self, test_exporter_factory):
@@ -109,11 +89,11 @@ class TestBigQueryExporter:
 
         assert test_field.is_custom_field
 
-    def test_custom_field_succeeds_during_processing(self, bigquery_client_factory, mocker, mock_model):
+    def test_custom_field_succeeds_during_processing(self, bigquery_client_factory, mocker, mock_model, test_exporter_factory):
         mock_model.field_value = 1
         # mock the client to return a table with the field 'field_value' and 'custom_field'
         mock_client = bigquery_client_factory('test_table', ['field_value', 'custom_field'])
-        mocker.patch('bigquery_exporter.base.bigquery.Client', return_value=mock_client)
+        exporter = test_exporter_factory(client=mock_client, mock_process_queryset=False)
 
         class TestBigQueryExporter(BigQueryExporter):
             model = mock_model
@@ -124,8 +104,8 @@ class TestBigQueryExporter:
             def custom_field(self, obj):
                 return obj.field_value * 2
 
-        # make sure we're mocking bigquery.Client
-        exporter = TestBigQueryExporter()
+        exporter = TestBigQueryExporter(client=mock_client)
+
         mock_queryset = [mock_model]
         pull_time = datetime.datetime(2023, 1, 1, 0, 0, 0)
         processed_data = exporter._process_queryset(mock_queryset, pull_time)
@@ -136,19 +116,14 @@ class TestBigQueryExporter:
             assert processed['custom_field'] == 2
             assert 'pull_date' not in processed  # pull_date should not be included by default
 
-    def test_process_queryset_with_pull_date(self, bigquery_client_factory, mocker, mock_model):
+    def test_process_queryset_with_pull_date(self, bigquery_client_factory, mocker, mock_model, test_exporter_factory):
         mock_model.field_value = 1
         # mock the client to return a table with the field 'field_value' and 'pull_date'
         mock_client = bigquery_client_factory('test_table', ['field_value', 'pull_date'])
-        mocker.patch('bigquery_exporter.base.bigquery.Client', return_value=mock_client)
+        exporter = test_exporter_factory(client=mock_client, mock_process_queryset=False)
+        exporter.fields = ['field_value']
+        exporter.include_pull_date = True
 
-        class TestBigQueryExporter(BigQueryExporter):
-            model = mock_model
-            table_name = 'test_table'
-            fields = ['field_value']
-            include_pull_date = True
-
-        exporter = TestBigQueryExporter()
         mock_queryset = [mock_model]
         pull_time = datetime.datetime(2023, 1, 1, 0, 0, 0)
         processed_data = exporter._process_queryset(mock_queryset, pull_time)
@@ -158,20 +133,14 @@ class TestBigQueryExporter:
             assert processed['field_value'] == 1
             assert processed['pull_date'] == pull_time.strftime('%Y-%m-%d %H:%M:%S')
 
-    def test_process_queryset_with_custom_pull_date_name(self, bigquery_client_factory, mocker, mock_model):
+    def test_process_queryset_with_custom_pull_date_name(self, bigquery_client_factory, mocker, mock_model, test_exporter_factory):
         mock_model.field_value = 1
-        # mock the client to return a table with the field 'field_value' and 'export_time'
         mock_client = bigquery_client_factory('test_table', ['field_value', 'export_time'])
-        mocker.patch('bigquery_exporter.base.bigquery.Client', return_value=mock_client)
+        exporter = test_exporter_factory(client=mock_client, mock_process_queryset=False)
+        exporter.fields = ['field_value']
+        exporter.include_pull_date = True
+        exporter.pull_date_field_name = 'export_time'
 
-        class TestBigQueryExporter(BigQueryExporter):
-            model = mock_model
-            table_name = 'test_table'
-            fields = ['field_value']
-            include_pull_date = True
-            pull_date_field_name = 'export_time'
-
-        exporter = TestBigQueryExporter()
         mock_queryset = [mock_model]
         pull_time = datetime.datetime(2023, 1, 1, 0, 0, 0)
         processed_data = exporter._process_queryset(mock_queryset, pull_time)
@@ -230,18 +199,11 @@ class TestBigQueryExporter:
             test_exporter.export()
         assert 'Queryset must be ordered (using .order_by()) when batch size (3) is smaller than queryset size (5)' in str(exc_info.value)
 
-    def test_sanitize_value_converts_naive_datetime_to_utc(self, bigquery_client_factory, mocker, mock_model):
+    def test_sanitize_value_converts_naive_datetime_to_utc(self, bigquery_client_factory, mocker, mock_model, test_exporter_factory):
         """Test that naive datetime objects are converted to UTC before stringifying"""
         # mock the client to return a table with the required fields
         mock_client = bigquery_client_factory('test_table', ['field_value'])
-        mocker.patch('bigquery_exporter.base.bigquery.Client', return_value=mock_client)
-
-        class TestBigQueryExporter(BigQueryExporter):
-            model = mock_model
-            table_name = 'test_table'
-            fields = []
-
-        exporter = TestBigQueryExporter()
+        exporter = test_exporter_factory(client=mock_client)
 
         # Create a naive datetime
         naive_dt = datetime.datetime(2023, 1, 1, 12, 0, 0)
@@ -254,18 +216,11 @@ class TestBigQueryExporter:
         expected = pytz.UTC.localize(naive_dt).strftime('%Y-%m-%d %H:%M:%S')
         assert result == expected
 
-    def test_sanitize_value_preserves_aware_datetime_timezone(self, bigquery_client_factory, mocker, mock_model):
+    def test_sanitize_value_preserves_aware_datetime_timezone(self, bigquery_client_factory, mocker, mock_model, test_exporter_factory):
         """Test that timezone-aware datetime objects are correctly converted to UTC"""
         # mock the client to return a table with the required fields
         mock_client = bigquery_client_factory('test_table', ['field_value'])
-        mocker.patch('bigquery_exporter.base.bigquery.Client', return_value=mock_client)
-
-        class TestBigQueryExporter(BigQueryExporter):
-            model = mock_model
-            table_name = 'test_table'
-            fields = []
-
-        exporter = TestBigQueryExporter()
+        exporter = test_exporter_factory(client=mock_client)
 
         # Create a timezone-aware datetime (UTC+2)
         # Using pytz to create a timezone-aware datetime
@@ -278,20 +233,15 @@ class TestBigQueryExporter:
         expected = utc_time.strftime('%Y-%m-%d %H:%M:%S')
         assert result == expected
 
-    def test_process_queryset_applies_utc_conversion_to_pull_date(self, bigquery_client_factory, mocker, mock_model):
+    def test_process_queryset_applies_utc_conversion_to_pull_date(self, bigquery_client_factory, mocker, mock_model, test_exporter_factory):
         """Test that pull_date is properly converted to UTC in _process_queryset"""
         mock_model.field_value = 1
         # mock the client to return a table with the required fields
         mock_client = bigquery_client_factory('test_table', ['field_value', 'pull_date'])
-        mocker.patch('bigquery_exporter.base.bigquery.Client', return_value=mock_client)
+        exporter = test_exporter_factory(client=mock_client, mock_process_queryset=False)
+        exporter.include_pull_date = True
+        exporter.fields = ['field_value']
 
-        class TestBigQueryExporter(BigQueryExporter):
-            model = mock_model
-            table_name = 'test_table'
-            fields = []
-            include_pull_date = True
-
-        exporter = TestBigQueryExporter()
         mock_queryset = [mock_model]
 
         # Create a timezone-aware datetime (UTC+2)
@@ -317,3 +267,76 @@ class TestBigQueryExporter:
         # Should query with UTC date (Jan 1, not Jan 1 + timezone offset)
         expected_query = f'SELECT COUNT(*) FROM {test_exporter.table_name} WHERE DATE(pull_date) = "2023-01-01"'
         test_exporter.client.query.assert_called_with(expected_query)
+
+    def test_sanitize_value_with_type_specific_defaults(self, bigquery_client_factory, mocker, mock_field_factory, test_exporter_factory):
+        """Test _sanitize_value with replace_nulls_with_empty=True and different field types"""
+        # Create mock schema fields with proper attributes
+        string_field = mock_field_factory('string_field', 'STRING')
+        integer_field = mock_field_factory('integer_field', 'INTEGER')
+        float_field = mock_field_factory('float_field', 'FLOAT')
+        boolean_field = mock_field_factory('boolean_field', 'BOOLEAN')
+        json_field = mock_field_factory('json_field', 'JSON')
+        unknown_field = mock_field_factory('unknown_field', 'UNKNOWN_TYPE')
+
+        mock_client = bigquery_client_factory('test_table', [
+            string_field,
+            integer_field,
+            float_field,
+            boolean_field,
+            json_field,
+            unknown_field
+        ])
+
+        exporter = test_exporter_factory(client=mock_client, replace_nulls=True)
+
+        # Test with None values for different field types
+        assert exporter._sanitize_value(None, 'string_field') == ''
+        assert exporter._sanitize_value(None, 'integer_field') == 0
+        assert exporter._sanitize_value(None, 'float_field') == 0.0
+        assert exporter._sanitize_value(None, 'boolean_field') is False
+        assert exporter._sanitize_value(None, 'json_field') == '{}'
+        # Unknown type should default to empty string
+        assert exporter._sanitize_value(None, 'unknown_field') == ''
+        # Field not in schema should default to empty string
+        assert exporter._sanitize_value(None, 'nonexistent_field') == ''
+
+    def test_sanitize_value_with_none_values_disabled_replacement(self, mocker, bigquery_client_factory, mock_field_factory, test_exporter_factory):
+        """Test _sanitize_value with replace_nulls_with_empty=False"""
+        string_field = mock_field_factory('string_field', 'STRING')
+        integer_field = mock_field_factory('integer_field', 'INTEGER')
+
+        mock_client = bigquery_client_factory('test_table', [
+            string_field,
+            integer_field
+        ])
+
+        exporter = test_exporter_factory(client=mock_client, replace_nulls=False)
+
+        # Test with None values - should remain None
+        assert exporter._sanitize_value(None, 'string_field') is None
+        assert exporter._sanitize_value(None, 'integer_field') is None
+        assert exporter._sanitize_value(None, 'nonexistent_field') is None
+
+    def test_sanitize_value_with_non_none_values(self, mocker, bigquery_client_factory, mock_field_factory, test_exporter_factory):
+        """Test _sanitize_value with non-None values (should not be affected by type-specific defaults)"""
+        # Create mock schema fields with proper attributes
+        string_field = mock_field_factory('string_field', 'STRING')
+        integer_field = mock_field_factory('integer_field', 'INTEGER')
+        float_field = mock_field_factory('float_field', 'FLOAT')
+        boolean_field = mock_field_factory('boolean_field', 'BOOLEAN')
+
+        # Create a mock client with table
+        mock_client = bigquery_client_factory('test_table', [
+            string_field,
+            integer_field,
+            float_field,
+            boolean_field
+        ])
+
+        exporter = test_exporter_factory(client=mock_client, replace_nulls=True)
+
+        # Test with non-None values - should remain unchanged
+        assert exporter._sanitize_value("test", 'string_field') == "test"
+        assert exporter._sanitize_value(42, 'integer_field') == 42
+        assert exporter._sanitize_value(3.14, 'float_field') == 3.14
+        assert exporter._sanitize_value(True, 'boolean_field') is True
