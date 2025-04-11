@@ -33,10 +33,10 @@ class GoogleBigQueryClient(BigQueryClientInterface):
             BigQueryExporterInitError: If an error occurs while initializing the client.
         """
         try:
-            if credentials:
+            if credentials:  # use service account credentials if provided
                 service_account_info = service_account.Credentials.from_service_account_file(credentials)
                 self.client = bigquery.Client(project=project, credentials=service_account_info)
-            else:
+            else:  # otherwise client will search application default credentials
                 self.client = bigquery.Client(project=project)
         except GoogleAPICallError as e:
             logger.error(f"Error creating BigQuery client: {e}")
