@@ -5,7 +5,7 @@ setup(
         'Django >= 3.2.4',
         'google-auth >= 1.32.1',
         'google-cloud-bigquery >= 2.30.1',
-        'pytz >= 2023.3',
+        'pytz >= 2019.1',
     ],
     name='django-bigquery-exporter',
     packages=['bigquery_exporter'],
