@@ -95,13 +95,16 @@ class TestBigQueryExporter:
         mock_client = bigquery_client_factory('test_table', ['field_value', 'custom_field'])
         exporter = test_exporter_factory(client=mock_client, mock_process_queryset=False)
 
-        # Add the custom field method to the exporter
-        @custom_field
-        def custom_field_method(self, obj):
-            return obj.field_value * 2
+        class TestBigQueryExporter(BigQueryExporter):
+            model = mock_model
+            table_name = 'test_table'
+            fields = ['field_value', 'custom_field']
 
-        exporter.custom_field = custom_field_method.__get__(exporter, type(exporter))
-        exporter.fields = ['field_value', 'custom_field']
+            @custom_field
+            def custom_field(self, obj):
+                return obj.field_value * 2
+
+        exporter = TestBigQueryExporter(client=mock_client)
 
         mock_queryset = [mock_model]
         pull_time = datetime.datetime(2023, 1, 1, 0, 0, 0)
