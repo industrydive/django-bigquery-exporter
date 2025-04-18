@@ -265,15 +265,17 @@ class BigQueryExporter:
         elif isinstance(value, UUID):
             return str(value)
         elif value is None and self.replace_nulls_with_empty:
-            # If we don't have a field name, default to empty string
-            if field_name is None:
-                return ''
-
-            # Get the field type and look up the appropriate default value
-            field_type = self._field_types.get(field_name)
-            return BQ_TYPE_DEFAULTS.get(field_type, '')
+            return self._get_default_value(field_name)
         else:
             return value
+
+    def _get_default_value(self, field_name):
+        # If we don't have a field name, default to empty string
+        if field_name is None:
+            return ''
+        # Get the field type and look up the appropriate default value
+        field_type = self._field_types.get(field_name)
+        return BQ_TYPE_DEFAULTS.get(field_type, '')
 
     def _validate_fields(self):
         """
