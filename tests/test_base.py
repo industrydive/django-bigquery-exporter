@@ -131,7 +131,7 @@ class TestBigQueryExporter:
         assert len(processed_data) == len(mock_queryset)
         for original, processed in zip(mock_queryset, processed_data):
             assert processed['field_value'] == 1
-            assert processed['pull_date'] == pull_time.strftime('%Y-%m-%d %H:%M:%S')
+            assert processed['pull_date'] == pull_time.strftime('%Y-%m-%d %H:%M:%S.%f')
 
     def test_process_queryset_with_custom_pull_date_name(self, bigquery_client_factory, mocker, mock_model, test_exporter_factory):
         mock_model.field_value = 1
@@ -148,7 +148,7 @@ class TestBigQueryExporter:
         assert len(processed_data) == len(mock_queryset)
         for original, processed in zip(mock_queryset, processed_data):
             assert processed['field_value'] == 1
-            assert processed['export_time'] == pull_time.strftime('%Y-%m-%d %H:%M:%S')
+            assert processed['export_time'] == pull_time.strftime('%Y-%m-%d %H:%M:%S.%f')
             assert 'pull_date' not in processed
 
     def test_table_has_data_with_pull_date_disabled(self, test_exporter):
@@ -213,7 +213,7 @@ class TestBigQueryExporter:
         assert isinstance(result, str)
 
         # The result should be the same time in UTC
-        expected = pytz.UTC.localize(naive_dt).strftime('%Y-%m-%d %H:%M:%S')
+        expected = pytz.UTC.localize(naive_dt).strftime('%Y-%m-%d %H:%M:%S.%f')
         assert result == expected
 
     def test_sanitize_value_preserves_aware_datetime_timezone(self, bigquery_client_factory, mocker, mock_model, test_exporter_factory):
@@ -230,7 +230,7 @@ class TestBigQueryExporter:
 
         # Should be 10:00 UTC (or 9:00 depending on DST)
         utc_time = aware_dt.astimezone(pytz.UTC)
-        expected = utc_time.strftime('%Y-%m-%d %H:%M:%S')
+        expected = utc_time.strftime('%Y-%m-%d %H:%M:%S.%f')
         assert result == expected
 
     def test_process_queryset_applies_utc_conversion_to_pull_date(self, bigquery_client_factory, mocker, mock_model, test_exporter_factory):
@@ -252,7 +252,7 @@ class TestBigQueryExporter:
 
         # Pull date should be converted to UTC
         utc_time = pull_time.astimezone(pytz.UTC)
-        expected = utc_time.strftime('%Y-%m-%d %H:%M:%S')
+        expected = utc_time.strftime('%Y-%m-%d %H:%M:%S.%f')
         assert processed_data[0]['pull_date'] == expected
 
     def test_table_has_data_converts_timezone_aware_datetime(self, test_exporter):
