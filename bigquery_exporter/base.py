@@ -199,8 +199,11 @@ class BigQueryExporter:
         try:
             # Use the provided client if available, otherwise create a new one
             if client is not None:
-                if not isinstance(client, BigQueryClientInterface):
-                    raise TypeError(f"Expected a BigQueryClientInterface instance, got {type(client).__name__}")
+                # Duck typing - we don't check for inheritance, just that the object has the methods we need
+                required_methods = ['get_table', 'insert_rows', 'query']
+                for method in required_methods:
+                    if not callable(getattr(client, method, None)):
+                        raise TypeError(f"Client must implement '{method}' method")
                 self.client = client
             else:
                 self.client = GoogleBigQueryClient(project, credentials)
