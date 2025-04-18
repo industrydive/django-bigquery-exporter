@@ -6,5 +6,4 @@ def handle_datetime_value(value):
     else:
         # If naive datetime (no timezone), assume it's in UTC
         utc_value = pytz.UTC.localize(value)
-    return utc_value.strftime('%Y-%m-%d %H:%M:%S')
-
+    return utc_value.strftime('%Y-%m-%d %H:%M:%S.%f')
