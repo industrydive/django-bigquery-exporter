@@ -9,5 +9,5 @@ setup(
     ],
     name='django-bigquery-exporter',
     packages=find_packages(),
-    version='0.2.2',
+    version='0.2.3',
 )
