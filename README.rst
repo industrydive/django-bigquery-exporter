@@ -82,6 +82,8 @@ Available Properties
 :batch: Number of records to process in each batch, default: ``1000``
 :table_name: Full BigQuery table name (required), default: ``''``
 :replace_nulls_with_empty: Whether to replace ``None`` values with empty strings, default: ``False``
+:include_pull_date: Whether to include pull date in the export, default: ``False``
+:pull_date_field_name: Name of the field to store the export timestamp, default: ``'pull_date'``
 
 Available Methods
 -----------------
@@ -96,27 +98,71 @@ Define the queryset to export. Override this method to filter or order your data
         one_year_ago = datetime.date.today() - datetime.timedelta(days=365)
         return self.model.objects.filter(publication_date__gte=one_year_ago).order_by('id')
 
-export(pull_date=None)
-~~~~~~~~~~~~~~~~~~~~~~
+.. important::
+   When using batching (batch ≠ None), you **MUST** define proper ordering in your queryset
+   to ensure consistent pagination results.
 
-Export data to BigQuery. The ``pull_date`` parameter can be used to record when the data was exported::
+export(pull_date=None, queryset=None)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+Export data to BigQuery.
+
+* ``pull_date``: Optional timestamp to record when the data was exported (only included if ``include_pull_date=True``)
+* ``queryset``: Optional queryset to override the default. Useful for backfilling specific data.
+
+::
+
+    # Standard export
     exporter = BookExporter()
     errors = exporter.export()
+
+    # Export with specified pull_date
+    from datetime import datetime
+    exporter.export(pull_date=datetime.now())
+
+    # Backfilling specific data
+    historical_queryset = Book.objects.filter(
+        publication_date__year=2020
+    ).order_by('id')
+    exporter.export(queryset=historical_queryset)
+
     if errors:
         print(f"Encountered {len(errors)} errors during export")
 
 table_has_data(pull_date=None)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Check if the BigQuery table already has data for a specific pull date::
+Check if the BigQuery table has data. When both ``pull_date`` is provided AND ``include_pull_date`` is True, it checks for data with that specific pull date. Otherwise, it just checks if the table has any data at all.
+
+::
 
     exporter = BookExporter()
+
+    # Check with explicit pull date (only works if include_pull_date=True)
     pull_date = datetime.datetime.now()
     if not exporter.table_has_data(pull_date):
         exporter.export(pull_date=pull_date)
     else:
         print("Data already exported for today")
+
+    # Check for any data
+    if not exporter.table_has_data():
+        exporter.export()
+    else:
+        print("Table already has data")
+
+Dependency Injection
+--------------------
+
+Django BigQuery Exporter supports injection of the BigQuery client for better testability and flexibility::
+
+    # Injecting a custom BigQuery client
+    from google.cloud import bigquery
+    custom_client = bigquery.Client(project='my-project')
+
+    exporter = BookExporter(
+        client=custom_client
+    )
 
 Custom Fields
 --------------
@@ -153,6 +199,9 @@ Here's a complete example with a Book model::
             'id', 'title', 'author', 'publication_date', 'is_bestseller',
             'genre', 'page_count', 'created_at', 'updated_at', 'rating'
         ]
+        # Pull date configuration
+        include_pull_date = True             # Include pull date in the export
+        pull_date_field_name = 'export_date' # Custom field name
 
         def define_queryset(self):
             # Only export books updated in the last 30 days
@@ -215,11 +264,13 @@ You can use this information to log errors or retry specific records.
 Best Practices
 --------------
 
-1. Always define an ordering in ``define_queryset()`` when using batching
+1. **ALWAYS** define an ordering in ``define_queryset()`` when using batching - this is critical for consistent results
 2. Set appropriate batch sizes based on your model's complexity
 3. Use custom fields to preprocess data before export
 4. Implement idempotency checks with ``table_has_data()``
-5. Catch and handle ``GoogleAPICallError`` and ``BigQueryExporterError`` exceptions
+5. Use the ``queryset`` parameter for backfilling historical data rather than modifying your exporter class
+6. Consider using dependency injection for the BigQuery client for better testability
+7. Catch and handle ``GoogleAPICallError`` and ``BigQueryExporterError`` exceptions
 
 License
 -------
