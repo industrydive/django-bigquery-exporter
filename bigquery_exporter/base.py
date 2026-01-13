@@ -78,8 +78,11 @@ class BigQueryExporter:
         Args:
             project (str, optional): The Google Cloud project id. If not provided, the default project
                 will be used.
-            credentials (str, optional): The path to the service account credentials file. If not provided,
-                the default credentials will be used.
+            credentials (optional): Credentials to use for authentication. Can be either:
+                                    - str: Path to a service account JSON key file
+                                    - google.oauth2.service_account.Credentials: An existing
+                                      service account credentials object
+                                    If None, falls back to Application Default Credentials (ADC).
             client (BigQueryClientInterface, optional): A pre-configured BigQuery client instance.
                 If provided, project and credentials are ignored.
 
