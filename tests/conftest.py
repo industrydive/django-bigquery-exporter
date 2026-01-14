@@ -1,7 +1,8 @@
 import pytest
+from unittest.mock import MagicMock
 
 from django.db import models
-from google.cloud import bigquery
+from google.oauth2 import service_account
 
 from bigquery_exporter.base import BigQueryExporter
 from bigquery_exporter.clients.interface import BigQueryClientInterface
@@ -97,3 +98,19 @@ def test_exporter_factory(mocker, mock_model, qs_factory, bigquery_client_factor
         return exporter
 
     return create_test_exporter
+
+
+@pytest.fixture
+def mock_service_account_credentials():
+    """ Fixture for a fake service account credentials object """
+    return MagicMock(spec=service_account.Credentials)
+
+
+@pytest.fixture
+def fake_table():
+    """ Fake BigQuery Table object """
+    table = MagicMock()
+    table.project = 'fake-project'
+    table.dataset_id = 'fake_dataset'
+    table.table_id = 'fake_table'
+    return table
